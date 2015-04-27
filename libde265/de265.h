@@ -91,6 +91,7 @@ typedef enum {
   DE265_ERROR_LIBRARY_NOT_INITIALIZED=12,
   DE265_ERROR_WAITING_FOR_INPUT_DATA=13,
   DE265_ERROR_CANNOT_PROCESS_SEI=14,
+  DE265_ERROR_INVALID_LAYER_ID=15,
 
   // --- errors that should become obsolete in later libde265 versions ---
 
@@ -418,6 +419,88 @@ LIBDE265_API de265_error de265_init(void);
  */
 LIBDE265_API de265_error de265_free(void);
 
+
+/////////// MULTILAYER ///////////////////
+typedef void de265_multilayer_decoder_context; // private structure
+
+/* Get a new multilayer decoder context. Must be freed with de265_free_decoder_multilayer(). */
+LIBDE265_API de265_multilayer_decoder_context* de265_multilayer_new_decoder(void);
+
+/* Free multilayer decoder context. May only be called once on a context. */
+LIBDE265_API de265_error de265_multilayer_free_decoder(de265_multilayer_decoder_context*);
+
+LIBDE265_API void de265_multilayer_set_parameter_bool(de265_multilayer_decoder_context*, enum de265_param param, int value);
+LIBDE265_API void de265_multilayer_set_parameter_int(de265_multilayer_decoder_context*, enum de265_param param, int value);
+
+LIBDE265_API void de265_multilayer_set_limit_TID(de265_multilayer_decoder_context*,int max_tid); // highest temporal substream to decode
+LIBDE265_API void de265_multilayer_set_num_decode_layers(de265_multilayer_decoder_context*,int num_layer); // number of layers to decode
+
+/* Push a complete NAL unit without startcode into the multilayer decoder. The data must still
+   contain all stuffing-bytes.
+   This function only pushes data into the decoder, nothing will be decoded.
+*/
+LIBDE265_API de265_error de265_multilayer_push_NAL(de265_multilayer_decoder_context*, const void* data, int length,
+                                        de265_PTS pts, void* user_data);
+
+#ifndef LIBDE265_DISABLE_DEPRECATED
+/* Push more data into the multilayer decoder, must be raw h265.
+   All complete images in the data will be decoded, hence, do not push
+   too much data at once to prevent image buffer overflows.
+   The end of a picture can only be detected when the succeeding start-code
+   is read from the data.
+   If you want to flush the data and force decoding of the data so far
+   (e.g. at the end of a file), call de265_decode_data() with 'length' zero.
+
+   NOTE: This method is deprecated and will be removed in a future version.
+   You should use "de265_push_data" or "de265_push_NAL" and "de265_decode"
+   instead.
+*/
+LIBDE265_API LIBDE265_DEPRECATED de265_error de265_multilayer_decode_data(de265_multilayer_decoder_context*, const void* data, int length);
+#endif
+
+/* Push more data into the multilayer decoder, must be a raw h265 bytestream with startcodes.
+   The PTS is assigned to all NALs whose start-code 0x000001 is contained in the data.
+   The bytestream must contain all stuffing-bytes.
+   This function only pushes data into the decoder, nothing will be decoded.
+*/
+LIBDE265_API de265_error de265_multilayer_push_data(de265_multilayer_decoder_context*, const void* data, int length,
+                                         de265_PTS pts, void* user_data);
+
+/* Clear multilayer decoder state. Call this when skipping in the stream.
+ */
+LIBDE265_API void de265_multilayer_reset(de265_multilayer_decoder_context*);
+
+/* Indicate the end-of-stream. All data pending at the multilayer decoder input will be
+   pushed into the decoders and the decoded picture queue will be completely emptied.
+ */
+LIBDE265_API de265_error de265_multilayer_flush_data(de265_multilayer_decoder_context*);
+
+/* Do some decoding. Returns status whether it did perform some decoding or
+   why it could not do so. If 'more' is non-null, indicates whether de265_decode()
+   should be called again (possibly after resolving the indicated problem).
+   DE265_OK - decoding ok
+   DE265_ERROR_IMAGE_BUFFER_FULL - DPB full, extract some images before continuing
+   DE265_ERROR_WAITING_FOR_INPUT_DATA - insert more data before continuing
+
+   You have to consider these cases:
+   - decoding successful   -> err  = DE265_OK, more=true
+   - decoding stalled      -> err != DE265_OK, more=true
+   - decoding finished     -> err  = DE265_OK, more=false
+   - unresolvable error    -> err != DE265_OK, more=false
+ */
+LIBDE265_API de265_error de265_multilayer_decode(de265_multilayer_decoder_context*, int* more);
+
+/* Get next decoded picture and remove this picture from the decoder output queue.
+   Returns NULL is there is no decoded picture ready.
+   You can use the picture only until you call any other de265_* function. */
+LIBDE265_API const struct de265_image* de265_multilayer_get_next_picture(de265_multilayer_decoder_context*, int* layerID); // may return NULL
+
+LIBDE265_API de265_error de265_multilayer_get_warning(de265_multilayer_decoder_context*);
+
+/* Indicate that de265_push_data has just received data until the end of a NAL.
+   The remaining pending input data is put into a NAL package and forwarded to the decoder.
+*/
+LIBDE265_API void de265_multilayer_push_end_of_NAL(de265_decoder_context*);
 
 #ifdef __cplusplus
 }

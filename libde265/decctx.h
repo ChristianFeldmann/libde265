@@ -240,6 +240,8 @@ class decoder_context : public error_queue {
                                     de265_error*, de265_PTS pts,
                                     nal_header* nal_hdr, void* user_data);
 
+  void setLayerID(int id) { layer_ID = id; }
+
   //void push_current_picture_to_output_queue();
   de265_error push_picture_to_output_queue(image_unit*);
 
@@ -299,6 +301,7 @@ class decoder_context : public error_queue {
 
  private:
   // --- internal data ---
+   int layer_ID;
 
   video_parameter_set  vps[ DE265_MAX_VPS_SETS ];
   seq_parameter_set    sps[ DE265_MAX_SPS_SETS ];

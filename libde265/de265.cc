@@ -23,6 +23,7 @@
 
 #include "de265.h"
 #include "decctx.h"
+#include "decctx_multilayer.h"
 #include "util.h"
 #include "scan.h"
 #include "image.h"
@@ -659,4 +660,235 @@ LIBDE265_API void de265_get_image_NAL_header(const struct de265_image* img,
   if (nuh_layer_id)    *nuh_layer_id    = img->nal_hdr.nuh_layer_id;
   if (nuh_temporal_id) *nuh_temporal_id = img->nal_hdr.nuh_temporal_id;
 }
+}
+
+
+/////////// MULTILAYER ///////////////
+LIBDE265_API de265_multilayer_decoder_context* de265_multilayer_new_decoder()
+{
+  de265_error init_err = de265_init();
+  if (init_err != DE265_OK) {
+    return NULL;
+  }
+
+  decoder_context_multilayer* ctx = new decoder_context_multilayer;
+  if (!ctx) {
+    de265_free();
+    return NULL;
+  }
+
+  return (de265_multilayer_decoder_context*)ctx;
+}
+
+LIBDE265_API void de265_multilayer_set_parameter_bool(de265_multilayer_decoder_context* de265ctx, enum de265_param param, int value)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  switch (param)
+    {
+    case DE265_DECODER_PARAM_BOOL_SEI_CHECK_HASH:
+      ctx->param_sei_check_hash = !!value;
+      break;
+
+    case DE265_DECODER_PARAM_SUPPRESS_FAULTY_PICTURES:
+      ctx->param_suppress_faulty_pictures = !!value;
+      break;
+
+    case DE265_DECODER_PARAM_DISABLE_DEBLOCKING:
+      ctx->param_disable_deblocking = !!value;
+      break;
+
+    case DE265_DECODER_PARAM_DISABLE_SAO:
+      ctx->param_disable_sao = !!value;
+      break;
+
+      /*
+    case DE265_DECODER_PARAM_DISABLE_MC_RESIDUAL_IDCT:
+      ctx->param_disable_mc_residual_idct = !!value;
+      break;
+
+    case DE265_DECODER_PARAM_DISABLE_INTRA_RESIDUAL_IDCT:
+      ctx->param_disable_intra_residual_idct = !!value;
+      break;
+      */
+
+    default:
+      assert(false);
+      break;
+    }
+}
+
+LIBDE265_API void de265_multilayer_set_parameter_int(de265_multilayer_decoder_context* de265ctx, enum de265_param param, int value)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  switch (param)
+    {
+    case DE265_DECODER_PARAM_DUMP_SPS_HEADERS:
+      ctx->param_sps_headers_fd = value;
+      break;
+
+    case DE265_DECODER_PARAM_DUMP_VPS_HEADERS:
+      ctx->param_vps_headers_fd = value;
+      break;
+
+    case DE265_DECODER_PARAM_DUMP_PPS_HEADERS:
+      ctx->param_pps_headers_fd = value;
+      break;
+
+    case DE265_DECODER_PARAM_DUMP_SLICE_HEADERS:
+      ctx->param_slice_headers_fd = value;
+      break;
+
+    case DE265_DECODER_PARAM_ACCELERATION_CODE:
+      ctx->accelerationFunction = ((enum de265_acceleration)value);
+      break;
+
+    default:
+      assert(false);
+      break;
+    }
+}
+
+LIBDE265_API void de265_multilayer_set_limit_TID(de265_multilayer_decoder_context* de265ctx,int max_tid)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+  ctx->limit_HighestTid = max_tid;
+}
+
+LIBDE265_API void de265_multilayer_set_num_decode_layers(de265_multilayer_decoder_context* de265ctx,int num_layer)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+  ctx->nrLayersToDecode = num_layer;
+}
+
+LIBDE265_API de265_error de265_multilayer_push_NAL(de265_multilayer_decoder_context* de265ctx,
+                                        const void* data8, int len,
+                                        de265_PTS pts, void* user_data)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+  uint8_t* data = (uint8_t*)data8;
+
+  //printf("push NAL (size %d)\n",len);
+  //dumpdata(data8,16);
+
+  return ctx->nal_parser.push_NAL(data,len,pts,user_data);
+}
+
+#ifndef LIBDE265_DISABLE_DEPRECATED
+LIBDE265_API de265_error de265_multilayer_decode_data(de265_multilayer_decoder_context* de265ctx,
+                                           const void* data8, int len)
+{
+  de265_error err;
+  if (len > 0) {
+    err = de265_multilayer_push_data(de265ctx, data8, len, 0, NULL);
+  } else {
+    err = de265_multilayer_flush_data(de265ctx);
+  }
+  if (err != DE265_OK) {
+    return err;
+  }
+
+  int more = 0;
+  do {
+    err = de265_multilayer_decode(de265ctx, &more);
+    if (err != DE265_OK) {
+        more = 0;
+    }
+
+    switch (err) {
+    case DE265_ERROR_WAITING_FOR_INPUT_DATA:
+      // ignore error (didn't exist in 0.4 and before)
+      err = DE265_OK;
+      break;
+    default:
+      break;
+    }
+  } while (more);
+  return err;
+}
+#endif
+
+LIBDE265_API de265_error de265_multilayer_push_data(de265_multilayer_decoder_context* de265ctx,
+                                         const void* data8, int len,
+                                         de265_PTS pts, void* user_data)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+  uint8_t* data = (uint8_t*)data8;
+
+  //printf("push data (size %d)\n",len);
+  //dumpdata(data8,16);
+
+  return ctx->nal_parser.push_data(data,len,pts,user_data);
+}
+
+LIBDE265_API void de265_multilayer_reset(de265_multilayer_decoder_context* de265ctx)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  //printf("--- reset ---\n");
+
+  ctx->reset();
+}
+
+LIBDE265_API de265_error de265_multilayer_flush_data(de265_multilayer_decoder_context* de265ctx)
+{
+  de265_multilayer_push_end_of_NAL(de265ctx);
+
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  ctx->flush_data();
+
+  return DE265_OK;
+}
+
+LIBDE265_API de265_error de265_multilayer_decode(de265_multilayer_decoder_context* de265ctx, int* more)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  return ctx->decode(more);
+}
+
+LIBDE265_API const struct de265_image* de265_multilayer_get_next_picture(de265_multilayer_decoder_context* de265ctx, int* layerID)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  if (ctx->num_pictures_in_output_queue()>0) {
+    de265_image* img = ctx->get_next_picture_in_output_queue(layerID);
+    if (img) {
+      // Release the image from the DPB
+      loginfo(LogDPB, "release layer %d DPB with POC=%d\n",layerID, img->PicOrderCntVal);
+
+      img->PicOutputFlag = false;
+
+      ctx->pop_next_picture_in_output_queue();
+    }
+    return img;
+  }
+  else {
+    return NULL;
+  }
+}
+
+LIBDE265_API de265_error de265_multilayer_get_warning(de265_multilayer_decoder_context* de265ctx)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  return ctx->get_warning();
+}
+
+LIBDE265_API void de265_multilayer_push_end_of_NAL(de265_multilayer_decoder_context* de265ctx)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  ctx->nal_parser.flush_data();
+}
+
+LIBDE265_API de265_error de265_multilayer_free_decoder(de265_multilayer_decoder_context* de265ctx)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+
+  delete ctx;
+
+  return de265_free();
 }

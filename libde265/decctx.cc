@@ -222,6 +222,8 @@ decoder_context::decoder_context()
   //memset(&thread_pool,0,sizeof(struct thread_pool));
   num_worker_threads = 0;
 
+  // Layer ID
+  layer_ID = 0;
 
   // frame-rate
 
