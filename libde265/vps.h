@@ -31,20 +31,12 @@
 
 #include "libde265/bitstream.h"
 #include "libde265/de265.h"
+#include "libde265/vui.h"
+#include "libde265/util.h"
 #include <vector>
 #include <map>
 
 #define MAX_TEMPORAL_SUBLAYERS 8
-typedef std::map<int, bool> bool_1d;
-typedef std::map<int, bool_1d> bool_2d;
-typedef std::map<int, int>    int_1d;
-typedef std::map<int, int_1d> int_2d;
-typedef std::map<int, int_2d> int_3d;
-typedef std::map<int, int_3d> int_4d;
-typedef std::map<int, int_4d> int_5d;
-//typedef std::map<int, std::map<int, std::map<int, std::map<int, int>>>> int_4d;
-//typedef std::map<int, std::map<int, std::map<int, std::map<int, std::map<int, int>>>>> int_5d;
-typedef std::map<int, std::map<int, char>> char_2d;
 
 /*
 struct bit_rate_pic_rate_info {
@@ -71,7 +63,6 @@ void dump_bit_rate_pic_rate_info(struct bit_rate_pic_rate_info* hdr,
 
 struct profile_data {
   // --- profile ---
-
   char sub_layer_profile_present_flag;
 
   char sub_layer_profile_space;
@@ -87,13 +78,18 @@ struct profile_data {
 
 
   // --- level ---
-
   char sub_layer_level_present_flag;
   int  sub_layer_level_idc;
 };
 
 
 struct profile_tier_level {
+  de265_error read_profile_tier_level( bitreader* reader,
+                                       bool profile_present_flag,
+                                       int max_sub_layers);
+
+  void dump_profile_tier_level(int max_sub_layers, FILE* fh);
+
   int general_profile_space;
   int general_tier_flag;
   int general_profile_idc;
@@ -110,15 +106,36 @@ struct profile_tier_level {
   struct profile_data profile[MAX_TEMPORAL_SUBLAYERS];
 };
 
-typedef struct {
+struct video_parameter_set;
+struct decoded_picture_buffer_size_table {
+  de265_error read_decoded_picture_buffer_size_table(bitreader* reader, video_parameter_set *vps);
+
+  bool_1d  sub_layer_flag_info_present_flag;
+  bool_2d  sub_layer_dpb_info_present_flag;
+  int_3d   max_vps_dec_pic_buffering_minus1;
+  int_2d   max_vps_num_reorder_pics;
+  int_2d   max_vps_latency_increase_plus1;
+};
+
+struct hrd_parameters;
+struct sub_layer_hrd_parameters {
+  de265_error read_sub_layer_hrd_parameters( bitreader* reader,
+                                             hrd_parameters *hrd,
+                                             int subLayerId);
+
   int_1d  bit_rate_value_minus1;
   int_1d  cpb_size_value_minus1;
   int_1d  cpb_size_du_value_minus1;
   int_1d  bit_rate_du_value_minus1;
   bool_1d cbr_flag;
-} sub_layer_hrd_parameters;
+};
 
-typedef struct {
+struct hrd_parameters {
+  de265_error read_hrd_parameters(bitreader* reader,
+                                video_parameter_set *vps,
+                                bool commonInfPresentFlag,
+                                int maxNumSubLayersMinus1);
+
   bool commonInfPresentFlag;
 
   // Common info
@@ -144,17 +161,18 @@ typedef struct {
   int_1d   cpb_cnt_minus1;
 
   std::map<int, sub_layer_hrd_parameters> sub_layer_hrd;
+};
 
-} hrd_parameters;
-
-typedef struct {
+struct conformance_window {
   int conf_win_vps_left_offset;
   int conf_win_vps_right_offset;
   int conf_win_vps_top_offset;
   int conf_win_vps_bottom_offset;
-} conformance_window;
+};
 
-typedef struct {
+struct rep_format {
+  de265_error parse_rep_format(bitreader* reader);
+
   int  pic_width_vps_in_luma_samples;
   int  pic_height_vps_in_luma_samples;
   bool chroma_and_bit_depth_vps_present_flag;
@@ -167,78 +185,13 @@ typedef struct {
   bool conformance_window_vps_flag;
 
   conformance_window m_conformanceWindowVps;
-} rep_format;
+};
 
-typedef struct {
-  int  video_vps_format;
-  bool video_full_range_vps_flag;
-  int  colour_primaries_vps;
-  int  transfer_characteristics_vps;
-  int  matrix_coeffs_vps;
-} vps_vui_video_signal_info;
+struct video_parameter_set;
+struct video_parameter_set_extension{
+  de265_error read_vps_extension(bitreader* reader, video_parameter_set *vps);
 
-typedef struct {
-  int  vps_num_add_hrd_params;
-  
-  bool_1d cprms_add_present_flag;
-  int_1d  num_sub_layer_hrd_minus1;
-
-  std::map<int, hrd_parameters> hrd_params;
-
-  int_1d  num_signalled_partitioning_schemes;
-  int_2d  num_partitions_in_scheme_minus1;
-  int_4d  layer_included_in_partition_flag;
-  int_3d  num_bsp_schedules_minus1;
-  int_5d  bsp_hrd_idx;
-  int_5d  bsp_sched_idx;
-} vps_vui_bsp_hrd_params;
-
-typedef struct {
-  bool    cross_layer_pic_type_aligned_flag;
-  bool    cross_layer_irap_aligned_flag;
-  bool    all_layers_idr_aligned_flag;
-  bool    bit_rate_present_vps_flag;
-  bool    pic_rate_present_vps_flag;
-  bool_2d bit_rate_present_flag;
-  bool_2d pic_rate_present_flag;
-  int_2d  avg_bit_rate;
-  int_2d  max_bit_rate;
-  int_2d  constant_pic_rate_idc;
-  int_2d  avg_pic_rate;
-  bool    video_signal_info_idx_present_flag;
-  int     vps_num_video_signal_info_minus1;
-
-  std::map<int, vps_vui_video_signal_info> video_signal_info;
-
-  int  vps_video_signal_info_idx[8];
-  bool tiles_not_in_use_flag;
-  bool tiles_in_use_flag[8];
-  bool loop_filter_not_across_tiles_flag[8];
-  bool tile_boundaries_aligned_flag[8][8];
-  bool wpp_not_in_use_flag;
-  bool wpp_in_use_flag[8];
-  bool single_layer_for_non_irap_flag;
-  bool higher_layer_irap_skip_flag;
-  bool ilp_restricted_ref_layers_flag;
-  int  min_spatial_segment_offset_plus1[8][8];
-  bool ctu_based_offset_enabled_flag   [8][8];
-  int  min_horizontal_ctu_offset_plus1 [8][8];
-  bool vps_vui_bsp_hrd_present_flag;
-
-  vps_vui_bsp_hrd_params bsp_hrd_params;
-
-  bool base_layer_parameter_set_compatibility_flag[8];
-} vps_vui;
-
-typedef struct {
-  bool_1d  sub_layer_flag_info_present_flag;
-  bool_2d  sub_layer_dpb_info_present_flag;
-  int_3d   max_vps_dec_pic_buffering_minus1;
-  int_2d   max_vps_num_reorder_pics;
-  int_2d   max_vps_latency_increase_plus1;
-} dpb_size_table;
-
-typedef struct {
+  // Parameters of the vps_extension
   std::map<int, profile_tier_level> vps_ext_PTL;
 
   bool     splitting_flag;
@@ -278,7 +231,7 @@ typedef struct {
   bool   vps_poc_lsb_aligned_flag;
   bool   poc_lsb_not_present_flag[8];
 
-  dpb_size_table dpb_size_table;
+  decoded_picture_buffer_size_table dpb_size_table;
   
   int   direct_dep_type_len_minus2;
   bool  direct_dependency_all_layers_flag;
@@ -288,15 +241,41 @@ typedef struct {
   bool  vps_vui_present_flag;
 
   vps_vui vui;
-} video_parameter_set_extension;
 
-typedef struct {
+  /// Variables calculated from the read parameters when parsing the vps_extension
+  int_1d   LayerIdxInVps;
+  int      NumLayerSets;
+  int_1d   MaxSubLayersInLayerSetMinus1;
+  bool_2d  DependencyFlag;
+  int_1d   NumDirectRefLayers;
+  int_1d   NumRefLayers;
+  int_1d   NumPredictedLayers;
+  int_2d   IdDirectRefLayer;
+  int_2d   IdRefLayer;
+  int_2d   IdPredictedLayer;
+  int_1d   OlsIdxToLsIdx;
+  bool_2d  NecessaryLayerFlag;
+  bool_2d  OutputLayerFlag;
+  int_1d   NumNecessaryLayers;
+  int_1d   NumOutputLayersInOutputLayerSet;
+  int_1d   OlsHighestOutputLayerId;
+  int      NumOutputLayerSets;
+  int_1d   NumLayersInIdList;
+  int_2d   LayerSetLayerIdList;
+
+};
+
+struct layer_data {
   int vps_max_dec_pic_buffering;
   int vps_max_num_reorder_pics;
   int vps_max_latency_increase;
-} layer_data;
+};
 
-typedef struct {
+struct video_parameter_set {
+  // Read the vps
+  de265_error read_vps(struct decoder_context* ctx, bitreader* reader);
+  void dump_vps(int fd);
+
   int  video_parameter_set_id;
   bool vps_base_layer_internal_flag;
   bool vps_base_layer_available_flag;
@@ -332,36 +311,9 @@ typedef struct {
 
   bool vps_extension2_flag;
 
-} video_parameter_set;
+  /// Variables calculated from the read parameters when parsing the vps
+  int MaxLayersMinus1;
 
-
-de265_error read_profile_tier_level(bitreader* reader,
-                             bool profile_present_flag,
-                             struct profile_tier_level* hdr,
-                             int max_sub_layers);
-
-void dump_profile_tier_level(const struct profile_tier_level* hdr,
-                             int max_sub_layers, FILE* fh);
-
-de265_error read_vps(struct decoder_context* ctx, bitreader* reader, video_parameter_set* vps);
-de265_error parse_rep_format(decoder_context* ctx, bitreader* reader, rep_format *rep);
-de265_error read_video_signal_info(bitreader* reader, vps_vui_video_signal_info* info);
-
-de265_error read_hrd_parameters(bitreader* reader,
-                                hrd_parameters *hrd,
-                                video_parameter_set *vps, 
-                                bool commonInfPresentFlag, 
-                                int maxNumSubLayersMinus1);
-
-de265_error read_sub_layer_hrd_parameters(bitreader* reader,
-                                   sub_layer_hrd_parameters *sub_hrd,
-                                   hrd_parameters *hrd,
-                                   int subLayerId);
-
-de265_error read_vps_extension(decoder_context* ctx, bitreader* reader, video_parameter_set *vps);
-
-void dump_vps(video_parameter_set*, int fd);
-void dump_profile_tier_level(const struct profile_tier_level* hdr,
-                             int max_sub_layers, FILE* fh);
+};
 
 #endif

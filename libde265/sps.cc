@@ -82,7 +82,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
   sps_temporal_id_nesting_flag = get_bits(br,1);
 
-  read_profile_tier_level(br, true, &profile_tier_level, sps_max_sub_layers);
+  ptl.read_profile_tier_level(br, true, sps_max_sub_layers);
 
   READ_VLC(seq_parameter_set_id, uvlc);
   if (seq_parameter_set_id >= DE265_MAX_SPS_SETS) {
@@ -292,6 +292,10 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   strong_intra_smoothing_enable_flag = get_bits(br,1);
   vui_parameters_present_flag = get_bits(br,1);
 
+
+  if (vui_parameters_present_flag) {
+    
+  }
 #if 0
   if (vui_parameters_present_flag) {
     assert(false);
@@ -387,7 +391,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
 
 
-void seq_parameter_set::dump_sps(int fd) const
+void seq_parameter_set::dump_sps(int fd)
 {
   //#if (_MSC_VER >= 1500)
   //#define LOG0(t) loginfo(LogHeaders, t)
@@ -411,7 +415,7 @@ void seq_parameter_set::dump_sps(int fd) const
   LOG1("sps_max_sub_layers      : %d\n", sps_max_sub_layers);
   LOG1("sps_temporal_id_nesting_flag : %d\n", sps_temporal_id_nesting_flag);
 
-  dump_profile_tier_level(&profile_tier_level, sps_max_sub_layers, fh);
+  ptl.dump_profile_tier_level(sps_max_sub_layers, fh);
 
   LOG1("seq_parameter_set_id    : %d\n", seq_parameter_set_id);
   LOG2("chroma_format_idc       : %d (%s)\n", chroma_format_idc,
@@ -645,7 +649,7 @@ void fill_scaling_factor(uint8_t* scalingFactors, const uint8_t* sclist, int siz
 }
 
 
-de265_error read_scaling_list(bitreader* br, const seq_parameter_set* sps,
+de265_error read_scaling_list(bitreader* br, seq_parameter_set* sps,
                               scaling_list_data* sclist, bool inPPS)
 {
   int dc_coeff[4][6];

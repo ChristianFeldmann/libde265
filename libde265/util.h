@@ -26,7 +26,7 @@
 #endif
 
 #include <stdio.h>
-
+#include <map>
 #include "libde265/de265.h"
 
 
@@ -137,5 +137,14 @@ void logtrace(enum LogModule module, const char* string, ...);
 #endif
 
 void log2fh(FILE* fh, const char* string, ...);
+
+typedef std::map<int, bool> bool_1d;
+typedef std::map<int, bool_1d> bool_2d;
+typedef std::map<int, int>    int_1d;
+typedef std::map<int, int_1d> int_2d;
+typedef std::map<int, int_2d> int_3d;
+typedef std::map<int, int_3d> int_4d;
+typedef std::map<int, int_4d> int_5d;
+typedef std::map<int, std::map<int, char>> char_2d;
 
 #endif

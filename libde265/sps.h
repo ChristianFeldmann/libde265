@@ -57,7 +57,7 @@ struct seq_parameter_set {
 
   de265_error read(struct decoder_context*, bitreader*);
 
-  void dump_sps(int fd) const;
+  void dump_sps(int fd);
 
   bool sps_read; // whether the sps has been read from the bitstream
 
@@ -66,7 +66,7 @@ struct seq_parameter_set {
   char sps_max_sub_layers;
   char sps_temporal_id_nesting_flag;
 
-  struct profile_tier_level profile_tier_level;
+  profile_tier_level ptl;
 
   int seq_parameter_set_id;
   int chroma_format_idc;
@@ -133,6 +133,7 @@ struct seq_parameter_set {
   char strong_intra_smoothing_enable_flag;
   char vui_parameters_present_flag;
 
+
   /*
     if( vui_parameters_present_flag )
       vui_parameters()
@@ -190,7 +191,7 @@ struct seq_parameter_set {
   int SpsMaxLatencyPictures[7]; // [temporal layer]
 };
 
-de265_error read_scaling_list(bitreader*, const seq_parameter_set*, scaling_list_data*, bool inPPS);
+de265_error read_scaling_list(bitreader*, seq_parameter_set*, scaling_list_data*, bool inPPS);
 void set_default_scaling_lists(scaling_list_data*);
 
 #endif

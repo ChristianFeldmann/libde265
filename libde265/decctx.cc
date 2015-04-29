@@ -508,13 +508,13 @@ de265_error decoder_context::read_vps_NAL(bitreader& reader)
   logdebug(LogHeaders,"---> read VPS\n");
 
   video_parameter_set vps = { 0 };
-  de265_error err = ::read_vps(this,&reader,&vps);
+  de265_error err = vps.read_vps(this,&reader);
   if (err != DE265_OK) {
     return err;
   }
 
   if (param_vps_headers_fd>=0) {
-    dump_vps(&vps, param_vps_headers_fd);
+    vps.dump_vps(param_vps_headers_fd);
   }
 
   process_vps(&vps);
