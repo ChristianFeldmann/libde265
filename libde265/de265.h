@@ -421,6 +421,9 @@ LIBDE265_API de265_error de265_free(void);
 
 
 /////////// MULTILAYER ///////////////////
+
+#define MAX_LAYER_ID 63  // Maximum number of layer supported by the standard (see vps_max_layers_minus1)
+
 typedef void de265_multilayer_decoder_context; // private structure
 
 /* Get a new multilayer decoder context. Must be freed with de265_free_decoder_multilayer(). */

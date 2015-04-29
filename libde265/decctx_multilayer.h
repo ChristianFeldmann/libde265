@@ -36,8 +36,6 @@
 #include "libde265/nal-parser.h"
 #include "libde265/decctx.h"
 
-#define MAX_NR_LAYERS 63  // Maximum number of layer supported by the standard (see vps_max_layers_minus1)
-
 class decoder_context_multilayer {
  public:
   decoder_context_multilayer();
@@ -79,11 +77,11 @@ class decoder_context_multilayer {
   int nrLayersToDecode;    // The ID of the highest layer to decode (1 for base layer only)
 
 protected:
-  decoder_context* layer_decoders[MAX_NR_LAYERS];
+  decoder_context* layer_decoders[MAX_LAYER_ID];
   int num_layer_decoders;
 
 
-  std::vector<image_unit*> image_units[MAX_NR_LAYERS]; // One image list per layer for the decoded images
+  std::vector<image_unit*> image_units[MAX_LAYER_ID]; // One image list per layer for the decoded images
 };
 
 

@@ -72,7 +72,7 @@ decoder_context_multilayer::decoder_context_multilayer()
   num_layer_decoders = 1;
   layer_decoders[0] = new decoder_context;
   layer_decoders[0]->setLayerID(0);
-  for (int i=1; i<MAX_NR_LAYERS; i++)
+  for (int i=1; i<MAX_LAYER_ID; i++)
     layer_decoders[i] = NULL;
 }
 

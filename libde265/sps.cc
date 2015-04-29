@@ -82,7 +82,7 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
   sps_temporal_id_nesting_flag = get_bits(br,1);
 
-  read_profile_tier_level(br,&profile_tier_level, sps_max_sub_layers);
+  read_profile_tier_level(br, true, &profile_tier_level, sps_max_sub_layers);
 
   READ_VLC(seq_parameter_set_id, uvlc);
   if (seq_parameter_set_id >= DE265_MAX_SPS_SETS) {
