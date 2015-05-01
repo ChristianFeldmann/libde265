@@ -117,52 +117,6 @@ struct decoded_picture_buffer_size_table {
   int_2d   max_vps_latency_increase_plus1;
 };
 
-struct hrd_parameters;
-struct sub_layer_hrd_parameters {
-  de265_error read_sub_layer_hrd_parameters( bitreader* reader,
-                                             hrd_parameters *hrd,
-                                             int subLayerId);
-
-  int_1d  bit_rate_value_minus1;
-  int_1d  cpb_size_value_minus1;
-  int_1d  cpb_size_du_value_minus1;
-  int_1d  bit_rate_du_value_minus1;
-  bool_1d cbr_flag;
-};
-
-struct hrd_parameters {
-  de265_error read_hrd_parameters(bitreader* reader,
-                                video_parameter_set *vps,
-                                bool commonInfPresentFlag,
-                                int maxNumSubLayersMinus1);
-
-  bool commonInfPresentFlag;
-
-  // Common info
-  bool nal_hrd_parameters_present_flag;
-  bool vcl_hrd_parameters_present_flag;
-  bool sub_pic_hrd_params_present_flag;
-  int  tick_divisor_minus2;
-  int  du_cpb_removal_delay_increment_length_minus1;
-  bool sub_pic_cpb_params_in_pic_timing_sei_flag;
-  int  dpb_output_delay_du_length_minus1;
-  int  bit_rate_scale;
-  int  cpb_size_scale;
-  int  cpb_size_du_scale;
-  int  initial_cpb_removal_delay_length_minus1;
-  int  au_cpb_removal_delay_length_minus1;
-  int  dpb_output_delay_length_minus1;
-  // end common info
-
-  bool_1d  fixed_pic_rate_general_flag;
-  bool_1d  fixed_pic_rate_within_cvs_flag;
-  int_1d   elemental_duration_in_tc_minus1;
-  bool_1d  low_delay_hrd_flag;
-  int_1d   cpb_cnt_minus1;
-
-  std::map<int, sub_layer_hrd_parameters> sub_layer_hrd;
-};
-
 struct conformance_window {
   int conf_win_vps_left_offset;
   int conf_win_vps_right_offset;
@@ -189,7 +143,7 @@ struct rep_format {
 
 struct video_parameter_set;
 struct video_parameter_set_extension{
-  de265_error read_vps_extension(bitreader* reader, video_parameter_set *vps);
+  de265_error read_vps_extension(struct decoder_context* ctx, bitreader* reader, video_parameter_set *vps);
 
   // Parameters of the vps_extension
   std::map<int, profile_tier_level> vps_ext_PTL;

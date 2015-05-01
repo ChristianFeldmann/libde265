@@ -223,7 +223,10 @@ decoder_context::decoder_context()
   num_worker_threads = 0;
 
   // Layer ID
+  // Default 0: All NAL units with nuh_layer_id != layer_ID will be discarded.
   layer_ID = 0;
+  dec_ctx_array = NULL;
+  ml_dec_params = NULL;
 
   // frame-rate
 
@@ -1051,8 +1054,8 @@ de265_error decoder_context::decode_NAL(NAL_unit* nal)
   nal_read_header(&reader, &nal_hdr);
   ctx->process_nal_hdr(&nal_hdr);
 
-  if (nal_hdr.nuh_layer_id > 0) {
-    // Discard all NAL units with nuh_layer_id > 0
+  if (nal_hdr.nuh_layer_id != layer_ID) {
+    // Discard all NAL units that this layer decoder is not responsible for decoding.
     // These will have to be handeled by an SHVC decoder.
     nal_parser.free_NAL_unit(nal);
     return DE265_OK;
@@ -2060,6 +2063,16 @@ void decoder_context::calc_tid_and_framerate_ratio()
   current_HighestTid = goal_HighestTid;
 }
 
+video_parameter_set* decoder_context::get_vps(int id)
+{
+  assert( id < DE265_MAX_VPS_SETS );
+  if (layer_ID != 0) {
+    // Multi layer decoding.
+    // The VPS is handeled by the base layer decoder. Get it there.
+    return get_layer_decoder_ctx(0)->get_vps(id);
+  }
+  return &vps[id];
+}
 
 void error_queue::add_warning(de265_error warning, bool once)
 {

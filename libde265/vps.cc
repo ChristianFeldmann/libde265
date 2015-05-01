@@ -133,7 +133,7 @@ de265_error video_parameter_set::read_vps(decoder_context* ctx, bitreader* reade
           cprms_present_flag[i] = get_bits(reader,1);
         }
 
-        hrd_params[i].read_hrd_parameters(reader, this, cprms_present_flag[i], vps_max_sub_layers-1);
+        hrd_params[i].read_hrd_parameters(reader, cprms_present_flag[i], vps_max_sub_layers-1);
       }
     }
   }
@@ -142,7 +142,7 @@ de265_error video_parameter_set::read_vps(decoder_context* ctx, bitreader* reade
 
   if (vps_extension_flag) {
     // Parser the VPS extension
-    vps_extension.read_vps_extension(reader, this);
+    vps_extension.read_vps_extension(ctx, reader, this);
 
     vps_extension2_flag = get_bits(reader,1);
     if (vps_extension2_flag) {
@@ -181,77 +181,7 @@ de265_error rep_format::parse_rep_format( bitreader* reader)
   return DE265_OK;
 }
 
-de265_error hrd_parameters::read_hrd_parameters( bitreader* reader,
-                                                 video_parameter_set *vps, 
-                                                 bool commonInfPresentFlag, 
-                                                 int maxNumSubLayersMinus1)
-{
-  if (commonInfPresentFlag) {
-    nal_hrd_parameters_present_flag = get_bits(reader,1);
-    vcl_hrd_parameters_present_flag = get_bits(reader,1);
-    if (nal_hrd_parameters_present_flag || vcl_hrd_parameters_present_flag) {
-      sub_pic_hrd_params_present_flag = get_bits(reader,1);
-      if (sub_pic_hrd_params_present_flag) {
-          tick_divisor_minus2 = get_bits(reader,8);
-          du_cpb_removal_delay_increment_length_minus1 = get_bits(reader,5);
-          sub_pic_cpb_params_in_pic_timing_sei_flag = get_bits(reader,1);
-          dpb_output_delay_du_length_minus1 = get_bits(reader,5);
-      }
-      bit_rate_scale = get_bits(reader,4);
-      cpb_size_scale = get_bits(reader,4);
-      if (sub_pic_hrd_params_present_flag) {
-        cpb_size_du_scale = get_bits(reader,4);
-      }
-      initial_cpb_removal_delay_length_minus1 = get_bits(reader,5);
-      au_cpb_removal_delay_length_minus1 = get_bits(reader,5);
-      dpb_output_delay_length_minus1 = get_bits(reader,5);
-    }
-  }
-
-  for( int i = 0; i <= maxNumSubLayersMinus1; i++ ) {
-    fixed_pic_rate_general_flag[ i ] = get_bits(reader,1);
-    if (!fixed_pic_rate_general_flag[i]) {
-      fixed_pic_rate_within_cvs_flag[ i ] = get_bits(reader,1);
-    }
-    if (fixed_pic_rate_within_cvs_flag[i]) {
-      elemental_duration_in_tc_minus1[i] = get_uvlc(reader);
-    }
-    else {
-      low_delay_hrd_flag[ i ] = get_bits(reader,1);
-    }
-    if (!low_delay_hrd_flag[i]) {
-      cpb_cnt_minus1[i] = get_uvlc(reader);
-    }
-    if (nal_hrd_parameters_present_flag) {
-      sub_layer_hrd[i].read_sub_layer_hrd_parameters(reader, this, i);
-    }
-    if (vcl_hrd_parameters_present_flag) {
-      sub_layer_hrd[i].read_sub_layer_hrd_parameters(reader, this, i);
-    }
-  }
-
-  return DE265_OK;
-}
-
-de265_error sub_layer_hrd_parameters::read_sub_layer_hrd_parameters( bitreader* reader,
-                                                                     hrd_parameters *hrd,
-                                                                     int subLayerId)
-{
-  int CpbCnt = hrd->cpb_cnt_minus1[subLayerId];
-  for( int i = 0; i <= CpbCnt; i++ ) {
-    bit_rate_value_minus1[ i ] = get_uvlc(reader);
-    cpb_size_value_minus1[ i ] = get_uvlc(reader);
-    if( hrd->sub_pic_hrd_params_present_flag ) {
-      cpb_size_du_value_minus1[ i ] = get_uvlc(reader);
-      bit_rate_du_value_minus1[ i ] = get_uvlc(reader);
-    }
-    cbr_flag[ i ] = get_bits(reader,1);
-  }
-
-  return DE265_OK;
-}
-
-de265_error video_parameter_set_extension::read_vps_extension(bitreader* reader, video_parameter_set *vps)
+de265_error video_parameter_set_extension::read_vps_extension(decoder_context* ctx, bitreader* reader, video_parameter_set *vps)
 {
   // Byte alignment (vps_extension_alignment_bit_equal_to_one)
   for (int nrBits = bits_to_byte_boundary(reader); nrBits > 0; nrBits--) {
@@ -497,10 +427,14 @@ de265_error video_parameter_set_extension::read_vps_extension(bitreader* reader,
   OutputLayerFlag[0][0] = 1;
 
   NumOutputLayerSets = num_add_olss + NumLayerSets;
+  layer_set_idx_for_ols_minus1[0] = -1;
   for( int i = 1; i < NumOutputLayerSets; i++ ) {
     if (NumLayerSets > 2 && i >= NumLayerSets) {
       int nr_bits = ceil_log2(NumLayerSets - 1);
       layer_set_idx_for_ols_minus1[i] = get_bits(reader,nr_bits);
+    }
+    else {
+      layer_set_idx_for_ols_minus1[i] = i - 1;
     }
     int defaultOutputLayerIdc = libde265_min(default_output_layer_idc, 2);
 
@@ -655,6 +589,78 @@ de265_error video_parameter_set_extension::read_vps_extension(bitreader* reader,
       }
     }
     vui.read_vps_vui(reader, vps);
+  }
+
+  // Reading the VPS extension is done.
+  // Check (calculate if not set) the output layer set index
+  multilayer_decoder_parameters* ml_dec_param = ctx->get_multilayer_decoder_parameters();
+  if (ml_dec_param) {
+    if (!ml_dec_param->values_checked) {
+      if (ml_dec_param->TargetOlsIdx == -1) {
+        // Target output layer set ID not set yet
+        if (ml_dec_param->TargetLayerId > vps->vps_max_layer_id) {
+          // Target layer ID too high
+          ml_dec_param->TargetLayerId = vps->vps_max_layer_id;
+        }
+
+        bool layerSetMatchFound = false;
+        // Output layer set index not assigned.
+        // Based on the value of targetLayerId, check if any of the output layer matches
+        // Currently, the target layer ID in the encoder assumes that all the layers are decoded    
+        // Check if any of the output layer sets match this description
+        for(int i = 0; i < NumOutputLayerSets; i++)
+        {
+          bool layerSetMatchFlag = false;
+          int layerSetIdx = layer_set_idx_for_ols_minus1[i] + 1;
+
+          for(int j = 0; j < NumLayersInIdList[layerSetIdx]; j++)
+          {
+            if( LayerSetLayerIdList[layerSetIdx][j] == ml_dec_param->TargetLayerId )
+            {
+              layerSetMatchFlag = true;
+              break;
+            }
+          }
+      
+          if( layerSetMatchFlag ) // Potential output layer set candidate found
+          {
+            // If target dec layer ID list is also included - check if they match
+            if( !ml_dec_param->TargetDecLayerSetIdx.empty() )
+            {
+              for(int j = 0; j < NumLayersInIdList[layerSetIdx]; j++)
+              {
+                if (ml_dec_param->TargetDecLayerSetIdx[j] != layer_id_in_nuh[LayerSetLayerIdList[layerSetIdx][j]])
+                {
+                  layerSetMatchFlag = false;
+                }
+              }
+            }
+            if( layerSetMatchFlag ) // The target dec layer ID list also matches, if present
+            {
+              // Match found
+              layerSetMatchFound = true;
+              ml_dec_param->TargetOlsIdx = i;
+              ml_dec_param->values_checked = true;
+              break;
+            }
+          }
+        }
+        assert( layerSetMatchFound ); // No output layer set matched the value of either targetLayerId or targetdeclayerIdlist
+  
+      }
+    }
+    else {
+      assert( ml_dec_param->TargetOlsIdx < NumOutputLayerSets );
+      int layerSetIdx = layer_set_idx_for_ols_minus1[ ml_dec_param->TargetOlsIdx ] + 1;  // Index to the layer set
+      // Check if the targetdeclayerIdlist matches the output layer set
+      if( !ml_dec_param->TargetDecLayerSetIdx.empty() ) {
+        for(int i = 0; i < NumLayersInIdList[layerSetIdx]; i++)
+        {
+          assert( ml_dec_param->TargetDecLayerSetIdx[i] == layer_id_in_nuh[LayerSetLayerIdList[layerSetIdx][i]]);
+        }
+      }
+      ml_dec_param->values_checked = true;
+    }
   }
 
   return DE265_OK;

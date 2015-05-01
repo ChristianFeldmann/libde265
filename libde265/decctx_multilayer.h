@@ -45,6 +45,10 @@ class decoder_context_multilayer {
   void reset();
   de265_error decode(int* more);
 
+  // Get the layer decoder context with the given layer_id.
+  // Create it if does not exist yet.
+  decoder_context* get_layer_dec(int layer_id);
+
   // Get the number of picture in the output queue (sum over all layers)
   int num_pictures_in_output_queue();
   // Get next output picture. Lowest layers will be returned first. Return the layer that the image is from.
@@ -74,12 +78,12 @@ class decoder_context_multilayer {
   NAL_Parser nal_parser;
 
   int limit_HighestTid;    // never switch to a layer above this one
-  int nrLayersToDecode;    // The ID of the highest layer to decode (1 for base layer only)
+
+  multilayer_decoder_parameters ml_dec_params;
 
 protected:
   decoder_context* layer_decoders[MAX_LAYER_ID];
   int num_layer_decoders;
-
 
   std::vector<image_unit*> image_units[MAX_LAYER_ID]; // One image list per layer for the decoded images
 };

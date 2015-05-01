@@ -756,11 +756,18 @@ LIBDE265_API void de265_multilayer_set_limit_TID(de265_multilayer_decoder_contex
   ctx->limit_HighestTid = max_tid;
 }
 
-LIBDE265_API void de265_multilayer_set_num_decode_layers(de265_multilayer_decoder_context* de265ctx,int num_layer)
+LIBDE265_API void de265_multilayer_set_target_decode_layers(de265_multilayer_decoder_context* de265ctx,int target_layer)
 {
   decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
-  ctx->nrLayersToDecode = num_layer;
+  ctx->ml_dec_params.TargetLayerId = target_layer;
 }
+
+LIBDE265_API void de265_multilayer_set_target_output_layer_setIdx(de265_multilayer_decoder_context* de265ctx,int ols_idx)
+{
+  decoder_context_multilayer* ctx = (decoder_context_multilayer*)de265ctx;
+  ctx->ml_dec_params.TargetOlsIdx = ols_idx;
+}
+
 
 LIBDE265_API de265_error de265_multilayer_push_NAL(de265_multilayer_decoder_context* de265ctx,
                                         const void* data8, int len,

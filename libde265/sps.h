@@ -40,6 +40,25 @@ enum {
   CHROMA_444_SEPARATE
 };
 
+struct sps_range_extension {
+  de265_error read_sps_range_extension(bitreader* reader);
+
+	bool transform_skip_rotation_enabled_flag;
+	bool transform_skip_context_enabled_flag;
+	bool implicit_rdpcm_enabled_flag;
+	bool explicit_rdpcm_enabled_flag;
+	bool extended_precision_processing_flag;
+	bool intra_smoothing_disabled_flag;
+	bool high_precision_offsets_enabled_flag;
+	bool persistent_rice_adaptation_enabled_flag;
+	bool cabac_bypass_alignment_enabled_flag;
+};
+
+struct sps_multilayer_extension {
+  de265_error read_sps_multilayer_extension(bitreader* reader);
+
+  bool inter_view_mv_vert_constraint_flag;
+};
 
 typedef struct scaling_list_data {
   // structure size: approx. 4 kB
@@ -66,9 +85,16 @@ struct seq_parameter_set {
   char sps_max_sub_layers;
   char sps_temporal_id_nesting_flag;
 
+  int sps_ext_or_max_sub_layers_minus1; // Annex F (Multilayer extensions)
+
   profile_tier_level ptl;
 
   int seq_parameter_set_id;
+
+  // Annex F (Multilayer extensions)
+  bool update_rep_format_flag;
+  int  sps_rep_format_idx;
+
   int chroma_format_idc;
 
   char separate_colour_plane_flag;
@@ -99,6 +125,8 @@ struct seq_parameter_set {
   int  max_transform_hierarchy_depth_intra;
 
   char scaling_list_enable_flag;
+  bool sps_infer_scaling_list_flag; // Annex F (Multilayer extensions)
+  int  sps_scaling_list_ref_layer_id; // Annex F
   char sps_scaling_list_data_present_flag; /* if not set, the default scaling lists will be set
                                               in scaling_list */
 
@@ -133,21 +161,15 @@ struct seq_parameter_set {
   char strong_intra_smoothing_enable_flag;
   char vui_parameters_present_flag;
 
+  vui_parameters vui;
 
-  /*
-    if( vui_parameters_present_flag )
-      vui_parameters()
-  */
+  bool sps_extension_present_flag;
+  bool sps_range_extension_flag;
+  bool sps_multilayer_extension_flag;
+  int  sps_extension_6bits;
 
-  char sps_extension_flag;
-
-  /*
-    if( sps_extension_flag )
-    while( more_rbsp_data() )
-    sps_extension_data_flag
-    u(1)
-    rbsp_trailing_bits()
-  */
+  sps_range_extension range_extension;
+  sps_multilayer_extension multilayer_extension;
 
   int BitDepth_Y;
   int QpBdOffset_Y;

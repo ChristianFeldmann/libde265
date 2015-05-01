@@ -1,4 +1,4 @@
-/*
+﻿/*
  * H.265 video codec.
  * Copyright (c) 2013-2014 struktur AG, Dirk Farin <farin@struktur.de>
  *
@@ -75,132 +75,205 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   int vlc;
 
   video_parameter_set_id = get_bits(br,4);
-  sps_max_sub_layers     = get_bits(br,3) +1;
-  if (sps_max_sub_layers>7) {
-    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+  
+  int nuh_layer_id = ctx->get_layer_id();
+  if (nuh_layer_id == 0) {
+    sps_max_sub_layers = get_bits(br,3) + 1;
+    if (sps_max_sub_layers>7) {
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+  }
+  else {
+    sps_ext_or_max_sub_layers_minus1 = get_bits(br,3);
+    
+    // Standard F.7.4.3.2.1 (JCTVC-R1013_v6)
+    // When not present, the value of sps_max_sub_layers_minus1 is inferred to be equal to ( sps_ext_or_max_sub_layers_minus1  = =  7 ) ? vps_max_sub_layers_minus1 : sps_ext_or_max_sub_layers_minus1.
+    if (sps_ext_or_max_sub_layers_minus1 == 7) {
+      // Get the VPS
+      video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+
+      sps_max_sub_layers = vps->vps_max_sub_layers;
+    } 
+    else {
+      sps_max_sub_layers = sps_ext_or_max_sub_layers_minus1 + 1;
+    }
   }
 
-  sps_temporal_id_nesting_flag = get_bits(br,1);
+  // Annex F (multilayer extensions)
+  bool MultiLayerExtSpsFlag = ( nuh_layer_id !=  0 && sps_ext_or_max_sub_layers_minus1 == 7 );
 
-  ptl.read_profile_tier_level(br, true, sps_max_sub_layers);
+  if (!MultiLayerExtSpsFlag) {
+    sps_temporal_id_nesting_flag = get_bits(br,1);
+    ptl.read_profile_tier_level(br, true, sps_max_sub_layers);
+  }
 
   READ_VLC(seq_parameter_set_id, uvlc);
   if (seq_parameter_set_id >= DE265_MAX_SPS_SETS) {
     return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
   }
+  
+  if (MultiLayerExtSpsFlag) {
+    // Infer picture size / color information from the VPS extension
+    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    video_parameter_set_extension *vps_ext = &vps->vps_extension;
+    int repFormatIdx;
 
-
-  // --- decode chroma type ---
-
-  READ_VLC(chroma_format_idc, uvlc);
-
-  if (chroma_format_idc == 3) {
-    separate_colour_plane_flag = get_bits(br,1);
+    update_rep_format_flag = get_bits(br,1);
+    if (update_rep_format_flag) {
+      sps_rep_format_idx = get_bits(br,8);
+      repFormatIdx = sps_rep_format_idx;
+    }
+    else {
+      repFormatIdx = vps_ext->vps_rep_format_idx[vps_ext->LayerIdxInVps[ ctx->get_layer_id() ]];
+    }
+    
+    if (repFormatIdx > vps_ext->vps_num_rep_formats_minus1) {
+      // repFormatIdx out of range
+      return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+    }
+    
+    // Infer values
+    rep_format rep = vps_ext->vps_ext_rep_format[repFormatIdx];
+    chroma_format_idc = rep.chroma_format_vps_idc;
+    separate_colour_plane_flag = rep.separate_colour_plane_vps_flag;
+    pic_width_in_luma_samples = rep.pic_width_vps_in_luma_samples;
+    pic_height_in_luma_samples = rep.pic_height_vps_in_luma_samples;
   }
   else {
-    separate_colour_plane_flag = 0;
-  }
+    // --- decode chroma type ---
 
-  if (separate_colour_plane_flag) {
-    ChromaArrayType = 0;
-  }
-  else {
-    ChromaArrayType = chroma_format_idc;
-  }
+    READ_VLC(chroma_format_idc, uvlc);
 
-  if (chroma_format_idc<0 ||
-      chroma_format_idc>3) {
-    ctx->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
-    return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
-  }
+    if (chroma_format_idc == 3) {
+      separate_colour_plane_flag = get_bits(br,1);
+    }
+    else {
+      separate_colour_plane_flag = 0;
+    }
 
-  SubWidthC  = SubWidthC_tab [chroma_format_idc];
-  SubHeightC = SubHeightC_tab[chroma_format_idc];
+    if (separate_colour_plane_flag) {
+      ChromaArrayType = 0;
+    }
+    else {
+      ChromaArrayType = chroma_format_idc;
+    }
 
-
-  // --- picture size ---
-
-  READ_VLC(pic_width_in_luma_samples,  uvlc);
-  READ_VLC(pic_height_in_luma_samples, uvlc);
-
-  conformance_window_flag = get_bits(br,1);
-
-  if (conformance_window_flag) {
-    READ_VLC(conf_win_left_offset,  uvlc);
-    READ_VLC(conf_win_right_offset, uvlc);
-    READ_VLC(conf_win_top_offset,   uvlc);
-    READ_VLC(conf_win_bottom_offset,uvlc);
-  }
-  else {
-    conf_win_left_offset  = 0;
-    conf_win_right_offset = 0;
-    conf_win_top_offset   = 0;
-    conf_win_bottom_offset= 0;
-  }
-
-  if (ChromaArrayType==0) {
-    WinUnitX = 1;
-    WinUnitY = 1;
-  }
-  else {
-    WinUnitX = SubWidthC_tab [chroma_format_idc];
-    WinUnitY = SubHeightC_tab[chroma_format_idc];
-  }
-
-
-  READ_VLC_OFFSET(bit_depth_luma,  uvlc, 8);
-  READ_VLC_OFFSET(bit_depth_chroma,uvlc, 8);
-
-  READ_VLC_OFFSET(log2_max_pic_order_cnt_lsb, uvlc, 4);
-  MaxPicOrderCntLsb = 1<<(log2_max_pic_order_cnt_lsb);
-
-
-  // --- sub_layer_ordering_info ---
-
-  sps_sub_layer_ordering_info_present_flag = get_bits(br,1);
-
-  int firstLayer = (sps_sub_layer_ordering_info_present_flag ?
-                    0 : sps_max_sub_layers-1 );
-
-  for (int i=firstLayer ; i <= sps_max_sub_layers-1; i++ ) {
-
-    // sps_max_dec_pic_buffering[i]
-
-    vlc=get_uvlc(br);
-    if (vlc == UVLC_ERROR ||
-        vlc+1 > MAX_NUM_REF_PICS) {
-      ctx->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+    if (chroma_format_idc<0 ||
+        chroma_format_idc>3) {
+      ctx->add_warning(DE265_WARNING_INVALID_CHROMA_FORMAT, false);
       return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
     }
 
-    sps_max_dec_pic_buffering[i] = vlc+1;
-
-    // sps_max_num_reorder_pics[i]
-
-    READ_VLC(sps_max_num_reorder_pics[i], uvlc);
+    SubWidthC  = SubWidthC_tab [chroma_format_idc];
+    SubHeightC = SubHeightC_tab[chroma_format_idc];
 
 
-    // sps_max_latency_increase[i]
+    // --- picture size ---
 
-    READ_VLC(sps_max_latency_increase_plus1[i], uvlc);
+    READ_VLC(pic_width_in_luma_samples,  uvlc);
+    READ_VLC(pic_height_in_luma_samples, uvlc);
 
-    SpsMaxLatencyPictures[i] = (sps_max_num_reorder_pics[i] +
-                                sps_max_latency_increase_plus1[i]-1);
+    conformance_window_flag = get_bits(br,1);
+
+    if (conformance_window_flag) {
+      READ_VLC(conf_win_left_offset,  uvlc);
+      READ_VLC(conf_win_right_offset, uvlc);
+      READ_VLC(conf_win_top_offset,   uvlc);
+      READ_VLC(conf_win_bottom_offset,uvlc);
+    }
+    else {
+      conf_win_left_offset  = 0;
+      conf_win_right_offset = 0;
+      conf_win_top_offset   = 0;
+      conf_win_bottom_offset= 0;
+    }
+
+    if (ChromaArrayType==0) {
+      WinUnitX = 1;
+      WinUnitY = 1;
+    }
+    else {
+      WinUnitX = SubWidthC_tab [chroma_format_idc];
+      WinUnitY = SubHeightC_tab[chroma_format_idc];
+    }
+
+
+    READ_VLC_OFFSET(bit_depth_luma,  uvlc, 8);
+    READ_VLC_OFFSET(bit_depth_chroma,uvlc, 8);
   }
 
-  // copy info to all layers if only specified once
+  READ_VLC_OFFSET(log2_max_pic_order_cnt_lsb, uvlc, 4);
+  MaxPicOrderCntLsb = 1<<(log2_max_pic_order_cnt_lsb);
+  
+  if (!MultiLayerExtSpsFlag) {
+    // --- sub_layer_ordering_info ---
 
-  if (sps_sub_layer_ordering_info_present_flag) {
-    int ref = sps_max_sub_layers-1;
-    assert(ref<7);
+    sps_sub_layer_ordering_info_present_flag = get_bits(br,1);
 
-    for (int i=0 ; i < sps_max_sub_layers-1; i++ ) {
-      sps_max_dec_pic_buffering[i] = sps_max_dec_pic_buffering[ref];
-      sps_max_num_reorder_pics[i]  = sps_max_num_reorder_pics[ref];
-      sps_max_latency_increase_plus1[i]  = sps_max_latency_increase_plus1[ref];
+    int firstLayer = (sps_sub_layer_ordering_info_present_flag ?
+                      0 : sps_max_sub_layers-1 );
+
+    for (int i=firstLayer ; i <= sps_max_sub_layers-1; i++ ) {
+
+      // sps_max_dec_pic_buffering[i]
+
+      vlc=get_uvlc(br);
+      if (vlc == UVLC_ERROR ||
+          vlc+1 > MAX_NUM_REF_PICS) {
+        ctx->add_warning(DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE, false);
+        return DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE;
+      }
+
+      sps_max_dec_pic_buffering[i] = vlc+1;
+
+      // sps_max_num_reorder_pics[i]
+
+      READ_VLC(sps_max_num_reorder_pics[i], uvlc);
+
+
+      // sps_max_latency_increase[i]
+
+      READ_VLC(sps_max_latency_increase_plus1[i], uvlc);
+
+      SpsMaxLatencyPictures[i] = (sps_max_num_reorder_pics[i] +
+                                  sps_max_latency_increase_plus1[i]-1);
+    }
+
+    // copy info to all layers if only specified once
+    if (sps_sub_layer_ordering_info_present_flag) {
+      int ref = sps_max_sub_layers-1;
+      assert(ref<7);
+
+      for (int i=0 ; i < sps_max_sub_layers-1; i++ ) {
+        sps_max_dec_pic_buffering[i] = sps_max_dec_pic_buffering[ref];
+        sps_max_num_reorder_pics[i]  = sps_max_num_reorder_pics[ref];
+        sps_max_latency_increase_plus1[i]  = sps_max_latency_increase_plus1[ref];
+      }
     }
   }
+  else {
+    // Standard F.7.4.3.2.1 JCTVC-R1013_v6
+    // 	When sps_max_dec_pic_buffering_minus1[ i ] is not present for i in the range of 0 to sps_max_sub_layers_minus1, inclusive, due to MultiLayerExtSpsFlag being equal to 1, for a layer that refers to the SPS and has nuh_layer_id equal to currLayerId, the value of sps_max_dec_pic_buffering_minus1[ i ] is inferred to be equal to max_vps_dec_pic_buffering_minus1[ TargetOlsIdx ][ layerIdx ][ i ] of the active VPS, where layerIdx is equal to the value such that LayerSetLayerIdList[ TargetDecLayerSetIdx ][ layerIdx ] is equal to currLayerId.
+    video_parameter_set* vps = ctx->get_vps(video_parameter_set_id);
+    video_parameter_set_extension* vps_ext = &vps->vps_extension;
+   
+    int TargetOlsIdx = ctx->get_multilayer_decoder_parameters()->TargetOlsIdx;
+    for (int i=0 ; i <= sps_max_sub_layers-1; i++ ) {
+      int TargetDecLayerSetIdx = vps_ext->OlsIdxToLsIdx[ TargetOlsIdx ];
+      int curLayerID = ctx->get_layer_id();
+      int layerIdx = -1;
+      for (int i = 0; i<vps_ext->NumLayersInIdList[TargetDecLayerSetIdx]; i++) {
+        if (vps_ext->LayerSetLayerIdList[TargetDecLayerSetIdx][i] == curLayerID) {
+          layerIdx = i;
+          break;
+        }
+      }
 
+      if (layerIdx != -1) {
+        sps_max_dec_pic_buffering[i] = vps_ext->dpb_size_table.max_vps_dec_pic_buffering_minus1[ TargetOlsIdx ][ layerIdx ][ i ] + 1;
+      }
+    }
+  }
 
   READ_VLC_OFFSET(log2_min_luma_coding_block_size, uvlc, 3);
   READ_VLC       (log2_diff_max_min_luma_coding_block_size, uvlc);
@@ -212,16 +285,24 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
   if (scaling_list_enable_flag) {
 
-    sps_scaling_list_data_present_flag = get_bits(br,1);
-    if (sps_scaling_list_data_present_flag) {
+    sps_infer_scaling_list_flag = false;
+    if (MultiLayerExtSpsFlag) {
+      sps_infer_scaling_list_flag = get_bits(br,1);
+    }
 
-      de265_error err;
-      if ((err=read_scaling_list(br,this, &scaling_list, false)) != DE265_OK) {
-        return err;
-      }
+    if (sps_infer_scaling_list_flag) {
+      sps_scaling_list_ref_layer_id = get_bits(br,6);
     }
     else {
-      set_default_scaling_lists(&scaling_list);
+      sps_scaling_list_data_present_flag = get_bits(br,1);
+      if (sps_scaling_list_data_present_flag) {
+        // scaling_list_data( )
+        de265_error err = read_scaling_list(br,this, &scaling_list, false);
+        if (err != DE265_OK) return err;
+      }
+      else {
+        set_default_scaling_lists(&scaling_list);
+      }
     }
   }
 
@@ -294,33 +375,33 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
 
 
   if (vui_parameters_present_flag) {
-    
-  }
-#if 0
-  if (vui_parameters_present_flag) {
-    assert(false);
-    /*
-      vui_parameters()
-
-        sps_extension_flag
-        u(1)
-        if( sps_extension_flag )
-
-          while( more_rbsp_data() )
-
-            sps_extension_data_flag
-              u(1)
-              rbsp_trailing_bits()
-    */
+    vui.read_vui_parameters(br, sps_max_sub_layers - 1);
   }
 
-  sps_extension_flag = get_bits(br,1);
-  if (sps_extension_flag) {
-    assert(false);
+  sps_extension_present_flag = get_bits(br,1);
+  if (sps_extension_present_flag) {
+    sps_range_extension_flag = get_bits(br,1);
+    sps_multilayer_extension_flag = get_bits(br,1);
+    sps_extension_6bits = get_bits(br,6);
+  }
+  else {
+    sps_range_extension_flag = false;
+    sps_multilayer_extension_flag = false;
+    sps_extension_6bits = 0;
   }
 
-  check_rbsp_trailing_bits(br);
-#endif
+  if (sps_range_extension_flag) {
+    //sps_range_extension( )
+    //range_extension.read_sps_range_extension(br);
+  }
+  if (sps_multilayer_extension_flag) {
+    //sps_multilayer_extension( )
+    //multilayer_extension.read_sps_multilayer_extension(br);
+  }
+  if (sps_extension_6bits > 0) {
+    // The remaining bits are sps_extension_data_flags
+  }
+  // The remaining bits are rsbp_trailing_bits()
 
   // --- compute derived values ---
 
@@ -389,7 +470,26 @@ de265_error seq_parameter_set::read(decoder_context* ctx, bitreader* br)
   return DE265_OK;
 }
 
+de265_error sps_range_extension::read_sps_range_extension(bitreader* reader)
+{
+  transform_skip_rotation_enabled_flag = get_bits(reader,1);
+  transform_skip_context_enabled_flag = get_bits(reader,1);
+  implicit_rdpcm_enabled_flag = get_bits(reader,1);
+  explicit_rdpcm_enabled_flag = get_bits(reader,1);
+  extended_precision_processing_flag = get_bits(reader,1);
+  intra_smoothing_disabled_flag = get_bits(reader,1);
+  high_precision_offsets_enabled_flag = get_bits(reader,1);
+  persistent_rice_adaptation_enabled_flag = get_bits(reader,1);
+  cabac_bypass_alignment_enabled_flag = get_bits(reader,1);
 
+  return DE265_OK;
+}
+
+de265_error sps_multilayer_extension::read_sps_multilayer_extension(bitreader* reader)
+{
+  inter_view_mv_vert_constraint_flag = get_bits(reader,1);
+  return DE265_OK;
+}
 
 void seq_parameter_set::dump_sps(int fd)
 {

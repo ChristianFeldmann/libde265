@@ -46,6 +46,21 @@
 struct slice_segment_header;
 struct image_unit;
 
+struct multilayer_decoder_parameters {
+  multilayer_decoder_parameters() {
+    TargetLayerId = 8; 
+    TargetOlsIdx = -1; 
+    highestTID = 6; 
+    values_checked = false;
+  }
+
+  int TargetLayerId;
+  int TargetOlsIdx; // The target output layer set index
+  std::vector<int> TargetDecLayerSetIdx; // 
+  int highestTID;
+
+  bool values_checked;
+};
 
 struct thread_context
 {
@@ -207,6 +222,7 @@ class decoder_context : public error_queue {
 
   void reset();
 
+  /* */ video_parameter_set* get_vps(int id);
   /* */ seq_parameter_set* get_sps(int id)       { return &sps[id]; }
   const seq_parameter_set* get_sps(int id) const { return &sps[id]; }
   /* */ pic_parameter_set* get_pps(int id)       { return &pps[id]; }
@@ -240,7 +256,13 @@ class decoder_context : public error_queue {
                                     de265_error*, de265_PTS pts,
                                     nal_header* nal_hdr, void* user_data);
 
-  void setLayerID(int id) { layer_ID = id; }
+  // Multi layer extension
+  void set_layer_id(int id) { layer_ID = id; }
+  int  get_layer_id()       { return layer_ID; }
+  void set_decoder_ctx_array(decoder_context** dec_array) { dec_ctx_array = dec_array; }
+  decoder_context* get_layer_decoder_ctx(int iIdx) { assert(iIdx < MAX_LAYER_ID); return *(dec_ctx_array + iIdx); }
+  void set_multilayer_decode_parameters(multilayer_decoder_parameters* param) { ml_dec_params = param; }
+  multilayer_decoder_parameters* get_multilayer_decoder_parameters() { return ml_dec_params; }
 
   //void push_current_picture_to_output_queue();
   de265_error push_picture_to_output_queue(image_unit*);
@@ -301,7 +323,11 @@ class decoder_context : public error_queue {
 
  private:
   // --- internal data ---
+   
+   // Multi layer extensions
    int layer_ID;
+   decoder_context** dec_ctx_array;  // Array with pointers to all layer decoder contexts
+   multilayer_decoder_parameters *ml_dec_params;
 
   video_parameter_set  vps[ DE265_MAX_VPS_SETS ];
   seq_parameter_set    sps[ DE265_MAX_SPS_SETS ];

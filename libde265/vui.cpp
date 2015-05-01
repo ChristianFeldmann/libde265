@@ -21,6 +21,85 @@
 #include "vui.h"
 #include "vps.h"
 
+de265_error vui_parameters::read_vui_parameters(bitreader* reader,
+                                                int sps_max_sub_layers_minus1)
+{
+  aspect_ratio_info_present_flag = get_bits(reader,1);
+  if (aspect_ratio_info_present_flag) {
+    int code = get_bits(reader,8);
+    if (code <= 16) aspect_ratio_idc = (SAR_Inidcator) code;
+    else if (code < 255 ) aspect_ratio_idc = SAR_RESERVED;
+    else aspect_ratio_idc = SAR_EXTENDED;
+    if (aspect_ratio_idc == SAR_EXTENDED) {
+      sar_width  = get_bits(reader,16);
+      sar_height = get_bits(reader,16);
+    }
+  }
+
+  overscan_info_present_flag = get_bits(reader,1);
+  if (overscan_info_present_flag) {
+    overscan_appropriate_flag = get_bits(reader,1);
+  }
+
+  video_signal_type_present_flag = get_bits(reader,1);
+  if (video_signal_type_present_flag) {
+    video_format = get_bits(reader,3);
+    video_full_range_flag = get_bits(reader,1);
+    colour_description_present_flag = get_bits(reader,1);
+    if (colour_description_present_flag) {
+      colour_primaries = get_bits(reader,8);
+      transfer_characteristics = get_bits(reader,8);
+      matrix_coeffs = get_bits(reader,8);
+    }
+  }
+
+  chroma_loc_info_present_flag = get_bits(reader,1);
+  if( chroma_loc_info_present_flag ) {
+    chroma_sample_loc_type_top_field = get_uvlc(reader);
+    chroma_sample_loc_type_bottom_field = get_uvlc(reader);
+  }
+
+  neutral_chroma_indication_flag = get_bits(reader,1);
+  field_seq_flag = get_bits(reader,1);
+  frame_field_info_present_flag = get_bits(reader,1);
+  default_display_window_flag = get_bits(reader,1);
+  if( default_display_window_flag ) {
+    def_disp_win_left_offset = get_uvlc(reader);
+    def_disp_win_right_offset = get_uvlc(reader);
+    def_disp_win_top_offset = get_uvlc(reader);
+    def_disp_win_bottom_offset = get_uvlc(reader);
+  }
+
+  vui_timing_info_present_flag = get_bits(reader,1);
+  if( vui_timing_info_present_flag ) {
+    vui_num_units_in_tick = get_bits(reader,32);
+    vui_time_scale = get_bits(reader,32);
+    vui_poc_proportional_to_timing_flag = get_bits(reader,1);
+    if (vui_poc_proportional_to_timing_flag) {
+      vui_num_ticks_poc_diff_one_minus1 = get_uvlc(reader);
+    }
+    vui_hrd_parameters_present_flag = get_bits(reader,1);
+    if (vui_hrd_parameters_present_flag) {
+      de265_error err = hrd.read_hrd_parameters(reader, true, sps_max_sub_layers_minus1 );
+      if (err != DE265_OK) return err;
+    }
+  }
+
+  bitstream_restriction_flag = get_bits(reader,1);
+  if( bitstream_restriction_flag ) {
+    tiles_fixed_structure_flag = get_bits(reader,1);
+    motion_vectors_over_pic_boundaries_flag = get_bits(reader,1);
+    restricted_ref_pic_lists_flag = get_bits(reader,1);
+    min_spatial_segmentation_idc = get_uvlc(reader);
+    max_bytes_per_pic_denom = get_uvlc(reader);
+    max_bits_per_min_cu_denom = get_uvlc(reader);
+    log2_max_mv_length_horizontal = get_uvlc(reader);
+    log2_max_mv_length_vertical = get_uvlc(reader);
+  }
+
+  return DE265_OK;
+}
+
 de265_error vps_vui_video_signal_info::read_video_signal_info(bitreader* reader)
 {
   video_vps_format = get_bits(reader,3);
@@ -45,7 +124,7 @@ de265_error vps_vui_bsp_hrd_params::read_vps_vui_bsp_hrd_params(bitreader* reade
     }
     num_sub_layer_hrd_minus1[i] = get_uvlc(reader);
         
-    hrd_params[i].read_hrd_parameters(reader, vps, cprms_add_present_flag[i], num_sub_layer_hrd_minus1[i]);
+    hrd_params[i].read_hrd_parameters(reader, cprms_add_present_flag[i], num_sub_layer_hrd_minus1[i]);
   }
 
   if( vps->vps_num_hrd_parameters + vps_num_add_hrd_params > 0 ) {
@@ -185,6 +264,75 @@ all_layers_idr_aligned_flag = get_bits(reader, 1);
     if (vps_ext->NumDirectRefLayers[vps_ext->layer_id_in_nuh[i]] == 0) {
       base_layer_parameter_set_compatibility_flag[i] = get_bits(reader, 1);
     }
+  }
+
+  return DE265_OK;
+}
+
+de265_error hrd_parameters::read_hrd_parameters( bitreader* reader,
+                                                 bool commonInfPresentFlag, 
+                                                 int maxNumSubLayersMinus1)
+{
+  if (commonInfPresentFlag) {
+    nal_hrd_parameters_present_flag = get_bits(reader,1);
+    vcl_hrd_parameters_present_flag = get_bits(reader,1);
+    if (nal_hrd_parameters_present_flag || vcl_hrd_parameters_present_flag) {
+      sub_pic_hrd_params_present_flag = get_bits(reader,1);
+      if (sub_pic_hrd_params_present_flag) {
+          tick_divisor_minus2 = get_bits(reader,8);
+          du_cpb_removal_delay_increment_length_minus1 = get_bits(reader,5);
+          sub_pic_cpb_params_in_pic_timing_sei_flag = get_bits(reader,1);
+          dpb_output_delay_du_length_minus1 = get_bits(reader,5);
+      }
+      bit_rate_scale = get_bits(reader,4);
+      cpb_size_scale = get_bits(reader,4);
+      if (sub_pic_hrd_params_present_flag) {
+        cpb_size_du_scale = get_bits(reader,4);
+      }
+      initial_cpb_removal_delay_length_minus1 = get_bits(reader,5);
+      au_cpb_removal_delay_length_minus1 = get_bits(reader,5);
+      dpb_output_delay_length_minus1 = get_bits(reader,5);
+    }
+  }
+
+  for( int i = 0; i <= maxNumSubLayersMinus1; i++ ) {
+    fixed_pic_rate_general_flag[ i ] = get_bits(reader,1);
+    if (!fixed_pic_rate_general_flag[i]) {
+      fixed_pic_rate_within_cvs_flag[ i ] = get_bits(reader,1);
+    }
+    if (fixed_pic_rate_within_cvs_flag[i]) {
+      elemental_duration_in_tc_minus1[i] = get_uvlc(reader);
+    }
+    else {
+      low_delay_hrd_flag[ i ] = get_bits(reader,1);
+    }
+    if (!low_delay_hrd_flag[i]) {
+      cpb_cnt_minus1[i] = get_uvlc(reader);
+    }
+    if (nal_hrd_parameters_present_flag) {
+      sub_layer_hrd[i].read_sub_layer_hrd_parameters(reader, this, i);
+    }
+    if (vcl_hrd_parameters_present_flag) {
+      sub_layer_hrd[i].read_sub_layer_hrd_parameters(reader, this, i);
+    }
+  }
+
+  return DE265_OK;
+}
+
+de265_error sub_layer_hrd_parameters::read_sub_layer_hrd_parameters( bitreader* reader,
+                                                                     hrd_parameters *hrd,
+                                                                     int subLayerId)
+{
+  int CpbCnt = hrd->cpb_cnt_minus1[subLayerId];
+  for( int i = 0; i <= CpbCnt; i++ ) {
+    bit_rate_value_minus1[ i ] = get_uvlc(reader);
+    cpb_size_value_minus1[ i ] = get_uvlc(reader);
+    if( hrd->sub_pic_hrd_params_present_flag ) {
+      cpb_size_du_value_minus1[ i ] = get_uvlc(reader);
+      bit_rate_du_value_minus1[ i ] = get_uvlc(reader);
+    }
+    cbr_flag[ i ] = get_bits(reader,1);
   }
 
   return DE265_OK;

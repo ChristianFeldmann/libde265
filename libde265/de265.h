@@ -436,7 +436,8 @@ LIBDE265_API void de265_multilayer_set_parameter_bool(de265_multilayer_decoder_c
 LIBDE265_API void de265_multilayer_set_parameter_int(de265_multilayer_decoder_context*, enum de265_param param, int value);
 
 LIBDE265_API void de265_multilayer_set_limit_TID(de265_multilayer_decoder_context*,int max_tid); // highest temporal substream to decode
-LIBDE265_API void de265_multilayer_set_num_decode_layers(de265_multilayer_decoder_context*,int num_layer); // number of layers to decode
+LIBDE265_API void de265_multilayer_set_target_decode_layers(de265_multilayer_decoder_context*,int num_layer); // number of layers to decode
+LIBDE265_API void de265_multilayer_set_target_output_layer_setIdx(de265_multilayer_decoder_context* de265ctx,int ols_idx);
 
 /* Push a complete NAL unit without startcode into the multilayer decoder. The data must still
    contain all stuffing-bytes.
