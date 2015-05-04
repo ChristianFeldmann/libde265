@@ -1021,6 +1021,16 @@ void derive_collocated_motion_vectors(base_context* ctx,
 
   assert(ctx->has_image(colPic));
   const de265_image* colImg = ctx->get_image(colPic);
+
+  // check for access outside image area
+
+  if (xColPb >= colImg->get_width() ||
+      yColPb >= colImg->get_height()) {
+    ctx->add_warning(DE265_WARNING_COLLOCATED_MOTION_VECTOR_OUTSIDE_IMAGE_AREA, false);
+    *out_availableFlagLXCol = 0;
+    return;
+  }
+
   enum PredMode predMode = colImg->get_pred_mode(xColPb,yColPb);
 
 
@@ -1505,6 +1515,10 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
   const int A=0;
   const int B=1;
 
+  out_availableFlagLXN[A] = 0;
+  out_availableFlagLXN[B] = 0;
+
+
   // --- A ---
 
   // 1.
@@ -1538,7 +1552,9 @@ void derive_spatial_luma_vector_prediction(base_context* ctx,
   int refIdxA=-1;
 
   // the POC we want to reference in this PB
-  const int referenced_POC = ctx->get_image(shdr->RefPicList[X][ refIdxLX ])->PicOrderCntVal;
+  const de265_image* tmpimg = ctx->get_image(shdr->RefPicList[X][ refIdxLX ]);
+  if (tmpimg==NULL) { return; }
+  const int referenced_POC = tmpimg->PicOrderCntVal;
 
   for (int k=0;k<=1;k++) {
     if (availableA[k] &&

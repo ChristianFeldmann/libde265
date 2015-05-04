@@ -53,7 +53,7 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
   case DE265_OK: return "no error";
   case DE265_ERROR_NO_SUCH_FILE: return "no such file";
     //case DE265_ERROR_NO_STARTCODE: return "no startcode found";
-  case DE265_ERROR_EOF: return "end of file";
+    //case DE265_ERROR_EOF: return "end of file";
   case DE265_ERROR_COEFFICIENT_OUT_OF_IMAGE_BOUNDS: return "coefficient out of image bounds";
   case DE265_ERROR_CHECKSUM_MISMATCH: return "image checksum mismatch";
   case DE265_ERROR_CTB_OUTSIDE_IMAGE_AREA: return "CTB outside of image area";
@@ -79,6 +79,10 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
     return "SEI data cannot be processed";
   case DE265_ERROR_PARAMETER_PARSING:
     return "command-line parameter error";
+  case DE265_ERROR_NO_INITIAL_SLICE_HEADER:
+    return "first slice missing, cannot decode dependent slice";
+  case DE265_ERROR_PREMATURE_END_OF_SLICE:
+    return "premature end of slice data";
 
   case DE265_WARNING_NO_WPP_CANNOT_USE_MULTITHREADING:
     return "Cannot run decoder multi-threaded because stream does not support WPP";
@@ -132,6 +136,8 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
     return "cannot apply SAO because we ran out of memory";
   case DE265_WARNING_SPS_MISSING_CANNOT_DECODE_SEI:
     return "SPS header missing, cannot decode SEI";
+  case DE265_WARNING_COLLOCATED_MOTION_VECTOR_OUTSIDE_IMAGE_AREA:
+    return "collocated motion-vector is outside image area";
 
   default: return "unknown error";
   }
@@ -661,4 +667,3 @@ LIBDE265_API void de265_get_image_NAL_header(const struct de265_image* img,
   if (nuh_temporal_id) *nuh_temporal_id = img->nal_hdr.nuh_temporal_id;
 }
 }
-

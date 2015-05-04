@@ -135,6 +135,8 @@ int logcnt=1;
 
 void init_CABAC_decoder(CABAC_decoder* decoder, uint8_t* bitstream, int length)
 {
+  assert(length >= 0);
+
   decoder->bitstream_start = bitstream;
   decoder->bitstream_curr  = bitstream;
   decoder->bitstream_end   = bitstream+length;
@@ -432,6 +434,15 @@ int  decode_CABAC_EGk_bypass(CABAC_decoder* decoder, int k)
 
 // ---------------------------------------------------------------------------
 
+void CABAC_encoder::add_trailing_bits()
+{
+  write_bit(1);
+  int nZeros = number_free_bits_in_byte();
+  write_bits(0, nZeros);
+}
+
+
+
 CABAC_encoder_bitstream::CABAC_encoder_bitstream()
 {
   data_mem = NULL;
@@ -506,6 +517,8 @@ void CABAC_encoder_bitstream::flush_VLC()
     append_byte(vlc_buffer << (8-vlc_buffer_len));
     vlc_buffer_len = 0;
   }
+
+  vlc_buffer = 0;
 }
 
 void CABAC_encoder_bitstream::skip_bits(int nBits)
@@ -518,6 +531,13 @@ void CABAC_encoder_bitstream::skip_bits(int nBits)
   if (nBits>0) {
     write_bits(0,nBits);
   }
+}
+
+
+int  CABAC_encoder_bitstream::number_free_bits_in_byte() const
+{
+  if ((vlc_buffer_len % 8)==0) return 0;
+  return 8- (vlc_buffer_len % 8);
 }
 
 
@@ -617,22 +637,9 @@ void CABAC_encoder_bitstream::flush_CABAC()
         }
     }
 
-  //fprintf(stderr,"low: %08x nbits left:%d\n",low,bits_left);
+  // printf("low: %08x  nbits left:%d  filled:%d\n",low,bits_left,32-bits_left);
 
-  int n = 32-bits_left;
-  int val = (low);
-
-  // make sure we output full bytes
-
-  while (n%8) {
-    val<<=1;
-    n++;
-  }
-
-  while (n>0) {
-    append_byte( (val>>(n-8)) & 0xFF );
-    n-=8;
-  }
+  write_bits(low >> 8, 24-bits_left);
 }
 
 

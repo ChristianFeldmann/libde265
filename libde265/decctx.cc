@@ -617,7 +617,7 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
 
   if (process_slice_segment_header(this, shdr, &err, nal->pts, &nal_hdr, nal->user_data) == false)
     {
-      img->integrity = INTEGRITY_NOT_DECODED;
+      if (img!=NULL) img->integrity = INTEGRITY_NOT_DECODED;
       nal_parser.free_NAL_unit(nal);
       delete shdr;
       return err;
@@ -663,7 +663,8 @@ de265_error decoder_context::read_slice_NAL(bitreader& reader, NAL_unit* nal, na
     image_units.back()->slice_units.push_back(sliceunit);
   }
 
-  decode_some();
+  bool did_work;
+  err = decode_some(&did_work);
 
   return DE265_OK;
 }
@@ -678,15 +679,11 @@ template <class T> void pop_front(std::vector<T>& vec)
 }
 
 
-de265_error decoder_context::decode_some()
+de265_error decoder_context::decode_some(bool* did_work)
 {
   de265_error err = DE265_OK;
 
-  if (0) {
-    static int cnt=0;
-    cnt++;
-    if (cnt<5) return DE265_OK;
-  }
+  *did_work = false;
 
   if (image_units.empty()) { return DE265_OK; }  // nothing to do
 
@@ -703,6 +700,8 @@ de265_error decoder_context::decode_some()
     if (sliceunit->flush_reorder_buffer) {
       dpb.flush_reorder_buffer();
     }
+
+    *did_work = true;
 
     //err = decode_slice_unit_sequential(imgunit, sliceunit);
     err = decode_slice_unit_parallel(imgunit, sliceunit);
@@ -724,6 +723,8 @@ de265_error decoder_context::decode_some()
          (nal_parser.is_end_of_stream() || nal_parser.is_end_of_frame()) )) {
 
     image_unit* imgunit = image_units[0];
+
+    *did_work=true;
 
 
     // mark all CTBs as decoded even if they are not, because faulty input
@@ -796,6 +797,10 @@ de265_error decoder_context::decode_slice_unit_sequential(image_unit* imgunit,
   tctx.task = NULL;
 
   init_thread_context(&tctx);
+
+  if (sliceunit->reader.bytes_remaining <= 0) {
+    return DE265_ERROR_PREMATURE_END_OF_SLICE;
+  }
 
   init_CABAC_decoder(&tctx.cabac_decoder,
                      sliceunit->reader.data,
@@ -932,6 +937,10 @@ de265_error decoder_context::decode_slice_unit_WPP(image_unit* imgunit,
     if (entryPt==nRows-1) dataEnd = sliceunit->reader.bytes_remaining;
     else                  dataEnd = shdr->entry_point_offset[entryPt];
 
+    if (dataEnd-dataStartIndex <= 0) {
+      return DE265_ERROR_PREMATURE_END_OF_SLICE;
+    }
+
     init_CABAC_decoder(&tctx->cabac_decoder,
                        &sliceunit->reader.data[dataStartIndex],
                        dataEnd-dataStartIndex);
@@ -1018,6 +1027,10 @@ de265_error decoder_context::decode_slice_unit_tiles(image_unit* imgunit,
     int dataEnd;
     if (entryPt==nTiles-1) dataEnd = sliceunit->reader.bytes_remaining;
     else                   dataEnd = shdr->entry_point_offset[entryPt];
+
+    if (dataEnd-dataStartIndex <= 0) {
+      return DE265_ERROR_PREMATURE_END_OF_SLICE;
+    }
 
     init_CABAC_decoder(&tctx->cabac_decoder,
                        &sliceunit->reader.data[dataStartIndex],
@@ -1167,12 +1180,14 @@ de265_error decoder_context::decode(int* more)
   // decode one NAL from the queue
 
   de265_error err = DE265_OK;
+  bool did_work = false;
 
   if (ctx->nal_parser.get_NAL_queue_length()) { // number_of_NAL_units_pending()) {
     NAL_unit* nal = ctx->nal_parser.pop_from_NAL_queue();
     assert(nal);
     err = ctx->decode_NAL(nal);
     // ctx->nal_parser.free_NAL_unit(nal); TODO: do not free NAL with new loop
+    did_work=true;
   }
   else if (ctx->nal_parser.is_end_of_frame() == true &&
       ctx->image_units.empty()) {
@@ -1181,12 +1196,12 @@ de265_error decoder_context::decode(int* more)
     return DE265_ERROR_WAITING_FOR_INPUT_DATA;
   }
   else {
-    err = decode_some();
+    err = decode_some(&did_work);
   }
 
   if (more) {
     // decoding error is assumed to be unrecoverable
-    *more = (err==DE265_OK);
+    *more = (err==DE265_OK && did_work);
   }
 
   return err;
@@ -1269,9 +1284,9 @@ void decoder_context::process_picture_order_count(decoder_context* ctx, slice_se
            ctx->img->PicOrderCntVal);
 
   if (ctx->img->nal_hdr.nuh_temporal_id==0 &&
-      (isReferenceNALU(ctx->nal_unit_type) &&
-       (!isRASL(ctx->nal_unit_type) && !isRADL(ctx->nal_unit_type))) &&
-      1 /* sub-layer non-reference picture */) // TODO
+      !isSublayerNonReference(ctx->nal_unit_type) &&
+      !isRASL(ctx->nal_unit_type) &&
+      !isRADL(ctx->nal_unit_type))
     {
       loginfo(LogHeaders,"set prevPicOrderCntLsb/Msb\n");
 
@@ -1629,11 +1644,14 @@ bool decoder_context::construct_reference_picture_lists(decoder_context* ctx, sl
     }
   }
 
-  if (hdr->num_ref_idx_l0_active > 15) {
+  /*
+  if (hdr->num_ref_idx_l0_active > 16) {
     ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
     return false;
   }
+  */
 
+  assert(hdr->num_ref_idx_l0_active <= 16);
   for (rIdx=0; rIdx<hdr->num_ref_idx_l0_active; rIdx++) {
     int idx = hdr->ref_pic_list_modification_flag_l0 ? hdr->list_entry_l0[rIdx] : rIdx;
 
@@ -1657,19 +1675,32 @@ bool decoder_context::construct_reference_picture_lists(decoder_context* ctx, sl
 
     int rIdx=0;
     while (rIdx < NumRpsCurrTempList1) {
-      for (int i=0;i<ctx->NumPocStCurrAfter && rIdx<NumRpsCurrTempList1; rIdx++,i++)
+      for (int i=0;i<ctx->NumPocStCurrAfter && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
         RefPicListTemp1[rIdx] = ctx->RefPicSetStCurrAfter[i];
+      }
 
-      for (int i=0;i<ctx->NumPocStCurrBefore && rIdx<NumRpsCurrTempList1; rIdx++,i++)
+      for (int i=0;i<ctx->NumPocStCurrBefore && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
         RefPicListTemp1[rIdx] = ctx->RefPicSetStCurrBefore[i];
+      }
 
       for (int i=0;i<ctx->NumPocLtCurr && rIdx<NumRpsCurrTempList1; rIdx++,i++) {
         RefPicListTemp1[rIdx] = ctx->RefPicSetLtCurr[i];
         isLongTerm[1][rIdx] = true;
       }
+
+      // This check is to prevent an endless loop when no images are added above.
+      if (rIdx==0) {
+        ctx->add_warning(DE265_WARNING_FAULTY_REFERENCE_PICTURE_LIST, false);
+        return false;
+      }
     }
 
-    assert(hdr->num_ref_idx_l1_active <= 15);
+    if (hdr->num_ref_idx_l0_active > 16) {
+    ctx->add_warning(DE265_WARNING_NONEXISTING_REFERENCE_PICTURE_ACCESSED, false);
+    return false;
+  }
+
+    assert(hdr->num_ref_idx_l1_active <= 16);
     for (rIdx=0; rIdx<hdr->num_ref_idx_l1_active; rIdx++) {
       int idx = hdr->ref_pic_list_modification_flag_l1 ? hdr->list_entry_l1[rIdx] : rIdx;
 
@@ -1913,6 +1944,13 @@ bool decoder_context::process_slice_segment_header(decoder_context* ctx, slice_s
     // next image is not the first anymore
 
     first_decoded_picture = false;
+  }
+  else {
+    // claims to be not the first slice, but there is no active image available
+
+    if (ctx->img == NULL) {
+      return false;
+    }
   }
 
   if (hdr->slice_type == SLICE_TYPE_B ||
