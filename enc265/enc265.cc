@@ -20,13 +20,12 @@
 
 #include "libde265/en265.h" //coder-context.h"
 
-#include "libde265/configparam.h"
-#include "libde265/image-io.h"
-#include "libde265/encoder/analyze.h"
+//#include "libde265/image-io.h"
+//#include "libde265/encoder/analyze.h"
 #include "libde265/util.h"
 
 #include <getopt.h>
-
+#include <stdlib.h>
 
 
 #if HAVE_VIDEOGFX
@@ -64,78 +63,26 @@ void debug_show_image_libvideogfx(const de265_image* input, int slot)
 
 int show_help=false;
 int verbosity=0;
+const char* output_bitstream = "out.str";
+const char* input_YUV = NULL;
+const char* rec_YUV = NULL;
+int inp_width = -1;
+int inp_height = -1;
+int frame_start = 0;
+int frame_num = -1;
 
 static struct option long_options[] = {
-  {"help",       no_argument,       &show_help, 1 },
-  {"verbose",    no_argument,       0, 'v' },
+  {"help",            no_argument,       &show_help, 1 },
+  {"verbose",         no_argument,       0, 'v' },
+  {"bitstream",       required_argument, 0, 'b' },
+  {"input",           required_argument, 0, 'i' },
+  {"reconstruction",  required_argument, 0, 'r' },
+  {"width",           required_argument, 0, 'w' },
+  {"height",          required_argument, 0, 'h' },
+  {"frame_start",     required_argument, 0, 's' },
+  {"frame_num",       required_argument, 0, 'n' },
   {0,            0,                 0,  0 }
 };
-
-
-struct inout_params
-{
-  inout_params();
-
-  // input
-
-  option_int first_frame;
-  option_int max_number_of_frames;
-
-  option_string input_yuv;
-  option_int input_width;
-  option_int input_height;
-
-  // output
-
-  option_string output_filename;
-
-  // debug
-
-  option_string reconstruction_yuv;
-
-
-  void register_params(config_parameters& config);
-};
-
-
-inout_params::inout_params()
-{
-  input_yuv.set_ID("input"); input_yuv.set_short_option('i');
-  input_yuv.set_default("paris_cif.yuv");
-
-  output_filename.set_ID("output"); output_filename.set_short_option('o');
-  output_filename.set_default("out.bin");
-
-  reconstruction_yuv.set_ID("input");
-  reconstruction_yuv.set_default("recon.yuv");
-
-  first_frame.set_ID("first-frame");
-  first_frame.set_default(0);
-  first_frame.set_minimum(0);
-
-  max_number_of_frames.set_ID("frames");
-  max_number_of_frames.set_short_option('f');
-  max_number_of_frames.set_minimum(1);
-  //max_number_of_frames.set_default(INT_MAX);
-
-  input_width.set_ID("width"); input_width.set_short_option('w');
-  input_width.set_minimum(1);  input_width.set_default(352);
-
-  input_height.set_ID("height"); input_height.set_short_option('h');
-  input_height.set_minimum(1); input_height.set_default(288);
-}
-
-
-void inout_params::register_params(config_parameters& config)
-{
-  config.add_option(&input_yuv);
-  config.add_option(&output_filename);
-  config.add_option(&first_frame);
-  config.add_option(&max_number_of_frames);
-  config.add_option(&input_width);
-  config.add_option(&input_height);
-}
-
 
 void test_parameters_API(en265_encoder_context* ectx)
 {
@@ -181,19 +128,10 @@ int main(int argc, char** argv)
 
   en265_encoder_context* ectx = en265_new_encoder();
 
-
   bool cmdline_errors = false;
 
   // --- in/out parameters ---
 
-  struct inout_params inout_params;
-  config_parameters inout_param_config;
-  inout_params.register_params(inout_param_config);
-
-  int first_idx=1;
-  if (!inout_param_config.parse_command_line_params(&argc,argv, &first_idx, true)) {
-    cmdline_errors = true;
-  }
 
 
   // --- read encoder parameters ---
@@ -207,37 +145,64 @@ int main(int argc, char** argv)
   while (1) {
     int option_index = 0;
 
-    int c = getopt_long(argc, argv, "v"
+    int c = getopt_long(argc, argv, "vb:i:r:w:h:s:n:"
                         , long_options, &option_index);
     if (c == -1)
       break;
 
     switch (c) {
-    case 'v': verbosity++; break;
+      case 'v': verbosity++; break;
+      case 'b' : output_bitstream = optarg; break;
+      case 'i' : input_YUV = optarg; break;
+      case 'r' : rec_YUV = optarg; break;
+      case 'w' : inp_width = atoi(optarg); break;
+      case 'h' : inp_height = atoi(optarg); break;
+      case 's' : frame_start = atoi(optarg); break;
+      case 'n' : frame_num = atoi(optarg); break;
     }
   }
 
+  if (!show_help) {
+    // These options are required
+    if (input_YUV == NULL) {
+      fprintf(stderr,"No input YUV file provided.\n");
+      cmdline_errors = true;
+    }
+    if (inp_width == -1) {
+      fprintf(stderr,"Width of the input YUV file not prvided.\n");
+      cmdline_errors = true;
+    }
+    if (inp_height == -1) {
+      fprintf(stderr,"Height of the input YUV file not prvided.\n");
+      cmdline_errors = true;
+    }
+  }
 
   // --- show usage information ---
 
   if (optind != argc || cmdline_errors || show_help) {
     fprintf(stderr," enc265  v%s\n", de265_get_version());
     fprintf(stderr,"--------------\n");
-    fprintf(stderr,"usage: enc265 [options]\n");
+    fprintf(stderr,"usage: enc265 [options] -i inp.yuv -w 352 -h 288\n");
     fprintf(stderr,"The video file must be a raw YUV file\n");
     fprintf(stderr,"\n");
     fprintf(stderr,"options:\n");
-    fprintf(stderr,"      --help         show help\n");
-    fprintf(stderr,"  -v, --verbose      increase verbosity level (up to 3 times)\n");
+    fprintf(stderr,"      --help              show help\n");
+    fprintf(stderr,"  -v, --verbose           increase verbosity level (up to 3 times)\n");
+    fprintf(stderr,"  -b, --bitstream         the output bitstream file (default: out.str)\n");
+    fprintf(stderr,"  -i, --input             the raw input YUV file\n");
+    fprintf(stderr,"  -r, --reconstruction    the reconstruction YUV file\n");
+    fprintf(stderr,"  -w, --width             the width of the input YUV file\n");
+    fprintf(stderr,"  -h, --height            the height of the input YUV file\n");
+    fprintf(stderr,"  -s, --frame_start       the frame number of frames to skip in the input YUV file\n");
+    fprintf(stderr,"  -n, --frame_num         the number of frames to encode\n");
 
-    inout_param_config.print_params();
+    //inout_param_config.print_params();
     fprintf(stderr,"\n");
     en265_show_parameters(ectx);
 
     exit(show_help ? 0 : 5);
   }
-
-
 
   de265_set_verbosity(verbosity);
 #if HAVE_VIDEOGFX
@@ -247,71 +212,71 @@ int main(int argc, char** argv)
   //test_parameters_API(ectx);
 
 
-  ImageSink_YUV reconstruction_sink;
-  if (strlen(inout_params.reconstruction_yuv.get().c_str()) != 0) {
-    reconstruction_sink.set_filename(inout_params.reconstruction_yuv.get().c_str());
-    //ectx.reconstruction_sink = &reconstruction_sink;
-  }
+  //ImageSink_YUV reconstruction_sink;
+  //if (strlen(inout_params.reconstruction_yuv.get().c_str()) != 0) {
+  //  reconstruction_sink.set_filename(inout_params.reconstruction_yuv.get().c_str());
+  //  //ectx.reconstruction_sink = &reconstruction_sink;
+  //}
 
-  ImageSource_YUV image_source;
-  image_source.set_input_file(inout_params.input_yuv.get().c_str(),
-                              inout_params.input_width,
-                              inout_params.input_height);
+  //ImageSource_YUV image_source;
+  //image_source.set_input_file(inout_params.input_yuv.get().c_str(),
+  //                            inout_params.input_width,
+  //                            inout_params.input_height);
 
-  PacketSink_File packet_sink;
-  packet_sink.set_filename(inout_params.output_filename.get().c_str());
+  //PacketSink_File packet_sink;
+  //packet_sink.set_filename(inout_params.output_filename.get().c_str());
 
 
   // --- run encoder ---
 
-  image_source.skip_frames( inout_params.first_frame );
+  //image_source.skip_frames( inout_params.first_frame );
 
-  en265_start_encoder(ectx, 0);
+  //en265_start_encoder(ectx, 0);
 
-  int maxPoc = INT_MAX;
-  if (inout_params.max_number_of_frames.is_defined()) {
-    maxPoc = inout_params.max_number_of_frames;
-  }
+  //int maxPoc = INT_MAX;
+  //if (inout_params.max_number_of_frames.is_defined()) {
+  //  maxPoc = inout_params.max_number_of_frames;
+  //}
 
-  bool eof = false;
-  for (int poc=0; poc<maxPoc && !eof ;poc++)
-    {
-      // push one image into the encoder
+  //bool eof = false;
+  //for (int poc=0; poc<maxPoc && !eof ;poc++)
+  //  {
+  //    // push one image into the encoder
 
-      de265_image* input_image = image_source.get_image();
-      if (input_image==NULL) {
-        en265_push_eof(ectx);
-        eof=true;
-      }
-      else {
-        en265_push_image(ectx, input_image);
-      }
-
-
-
-      // encode images while more are available
-
-      en265_encode(ectx);
+  //    de265_image* input_image = image_source.get_image();
+  //    if (input_image==NULL) {
+  //      en265_push_eof(ectx);
+  //      eof=true;
+  //    }
+  //    else {
+  //      en265_push_image(ectx, input_image);
+  //    }
 
 
-      // write all pending packets
 
-      for (;;) {
-        en265_packet* pck = en265_get_packet(ectx,0);
-        if (pck==NULL)
-          break;
+  //    // encode images while more are available
 
-        packet_sink.send_packet(pck->data, pck->length);
+  //    en265_encode(ectx);
 
-        en265_free_packet(ectx,pck);
-      }
-    }
+
+  //    // write all pending packets
+
+  //    for (;;) {
+  //      en265_packet* pck = en265_get_packet(ectx,0);
+  //      if (pck==NULL)
+  //        break;
+
+  //      packet_sink.send_packet(pck->data, pck->length);
+
+  //      en265_free_packet(ectx,pck);
+  //    }
+  //  }
 
 
 
   // --- print statistics ---
 
-  en265_print_logging((encoder_context*)ectx, "tb-split", NULL);
+  //en265_print_logging((encoder_context*)ectx, "tb-split", NULL);
 
 
   en265_free_encoder(ectx);
