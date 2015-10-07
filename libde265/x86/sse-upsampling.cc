@@ -32,6 +32,7 @@
 #include "sse-upsampling.h"
 #include "libde265/util.h"
 #include <assert.h>
+#include <stdlib.h>
 
 /*
 
@@ -97,13 +98,13 @@ vsum = _mm_add_epi32(vsum, _mm_srli_si128(vsum, 4));
 #elif _WIN32
 #define ALLOC_ALIGNED(alignment, size)         _aligned_malloc((size), (alignment))
 #define FREE_ALIGNED(mem)                      _aligned_free((mem))
-#elif __APPLE__
+#elif defined(HAVE_POSIX_MEMALIGN)
 static inline void *ALLOC_ALIGNED(size_t alignment, size_t size) {
-    void *mem = NULL;
-    if (posix_memalign(&mem, alignment, size) != 0) {
-        return NULL;
-    }
-    return mem;
+	void *mem = NULL;
+	if (posix_memalign(&mem, alignment, size) != 0) {
+		return NULL;
+	}
+	return mem;
 };
 #define FREE_ALIGNED(mem)                      free((mem))
 #else
@@ -196,7 +197,7 @@ ALIGNED_16(const int16_t) fL_16bit[128] = {  0, 0,   0, 64,  0,   0, 0,  0 ,
 // Measure the execution time of the upsampling and print it to stdout
 #define MEASURE_EXECUTION_TIME 0
 // Profile by getting CPU ticks and running the upsampling function multiple times
-#define PROFILE_FUNCTION 1
+#define PROFILE_FUNCTION 0
 
 #if MEASURE_EXECUTION_TIME
 #define INTMAX_MAX 9223372036854775807LL
