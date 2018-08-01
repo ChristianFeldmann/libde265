@@ -83,3 +83,12 @@ target_link_libraries(${LIBDE265_LIBRARY_NAME} ${CMAKE_THREAD_LIBS_INIT})
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
   SET_TARGET_PROPERTIES(${LIBDE265_LIBRARY_NAME} PROPERTIES COMPILE_FLAGS "-fPIC")
 endif(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+
+if(UNIX)
+  # could not find out how to determin library install path platform independent. this is for ubuntu (16.04)
+  INSTALL(TARGETS
+    #libaries
+    ${LIBDE265_LIBRARY_NAME}
+    LIBRARY DESTINATION "/usr/lib/x86_64-linux-gnu/"
+  )
+endif()
