@@ -89,6 +89,6 @@ if(UNIX)
   INSTALL(TARGETS
     #libaries
     ${LIBDE265_LIBRARY_NAME}
-    LIBRARY DESTINATION "/usr/lib/x86_64-linux-gnu/"
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   )
 endif()
