@@ -24,10 +24,3 @@ build_script:
 artifacts:
   - path: build/libde265/Release/libde265.dll
 
-deploy:
-  provider: GitHub
-  auth_token:
-    secure: boWJ9aVfVBpOkBGzWF5yS5/Os3eDUjFfziOY04+LNA+7v+PnMFBtHeMJe2PjK4gm
-  artifact: build/libde265/Release/libde265.dll
-  on:
-    appveyor_repo_tag: true        # deploy on tag push only

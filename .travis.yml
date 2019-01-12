@@ -24,12 +24,4 @@ script:
 before_deploy:
 - cd ..
 
-deploy:
-  skip_cleanup: true
-  provider: releases
-  api_key:
-    secure: ZobwRwAywhnRLIJoRNNud5vVHbXLXw/tj3okxa2u4jRqzw4/IDtnMluoOKGkBx/eBg80IoC6Wic7vxZyryD3UWhty9cEn50I8UsnT75flrNrOGQStHl+FrDpWn+OMk3rjNunkXzlq+bn4U+nA4UQSbtNrZ4ONKNMipzrDqJ6KKqya2ONIi3w94lqm0E2P0mboYqGd5LXSTrZ2fHpyakAJaE2RMBhO7vQplgo2jG23P4kT0ivOT7PS4gPf2fvGip6S+VmNiXGC/Pkk6RwecKtIp9KC5o6QwcDnmTkTwV8ExEMLvTVlzaNNCHI3RG1GD78ZQVKD6iI5IEe/JfsUiELPGLUBsmoladWvD6SuMOZijPWkHv+D3KV8WQLTQMczk5oZ8NQhBto05HrMXPcQ55sj9KRQWJ7Yd29y1L/Ghqj9iDXIJXK9xamEgBTsE+AI2mqh+cmE1+H1rwK1K0TcGAixcQANA6QRAtO74a1o20QmwxwQByLY4EW+UnafebWZKBiYFSTmRLgokQHOD5AnsRkKocKEcbEccpnifhIVuL5xveW9Hy1aueVYg0jiyG9FzOuNFRXRmTO2eBEjtZsamoA42U6i1vt0FqvRBISUwBPfJ76NKP1fy+rjltS5GHIuLFNaZlk71cmmsIJVtBJTIqzXmBXiNfbhjeAGLuybeejohY=
-  file: $DEPLOY_FILE
-  on:
-    repo: ChristianFeldmann/libde265
-    tags: true
+
