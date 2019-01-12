@@ -908,8 +908,8 @@ void generate_inter_prediction_samples(base_context* ctx,
           else
             dst[x] = src[x];
         }
-        src += stride;
-        dst += stride;
+        src += (stride << bpp_shift);
+        dst += (stride << bpp_shift);
       }
     }
   }

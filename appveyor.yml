@@ -1,7 +1,5 @@
 # stats available at
 # https://ci.appveyor.com/project/strukturag/libde265
-version: #{build}
-
 image: Visual Studio 2017
 
 environment:
@@ -21,6 +19,15 @@ build_script:
   - ps: if($env:PLATFORM -eq "x64") { $env:CMAKE_GEN_SUFFIX=" Win64" }
   - cmake "-G%GENERATOR%%CMAKE_GEN_SUFFIX%" -H. -Bbuild
   - cmake --build build --config %CONFIGURATION%
+  - dir
 
 artifacts:
-  - path: build
+  - path: build/libde265/Release/libde265.dll
+
+deploy:
+  provider: GitHub
+  auth_token:
+    secure: boWJ9aVfVBpOkBGzWF5yS5/Os3eDUjFfziOY04+LNA+7v+PnMFBtHeMJe2PjK4gm
+  artifact: build/libde265/Release/libde265.dll
+  on:
+    appveyor_repo_tag: true        # deploy on tag push only

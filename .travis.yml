@@ -1,42 +1,35 @@
 language: cpp
+matrix:
+  include:
+    - os: linux
+      dist: trusty
+      env: DEPLOY_FILE=release/libde265/libde265.so
+    - os: osx
+      env: DEPLOY_FILE=release/libde265/libde265.dylib
 compiler:
-  - gcc
+- gcc
 git:
   depth: 3
-os:
-  - linux
-  - osx
-  
-# safelist
-branches:
-  only:
-    - internal
 
-before_install:
-   # We need cmake on linux
-   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo add-apt-repository -y ppa:kalakris/cmake; fi
-   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get update -qq; fi
-   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get install cmake; fi
+before_install: 
 
 before_script:
-  - mkdir release
-  - cd release
-  - cmake -DCMAKE_BUILD_TYPE=Release ..
+- mkdir release
+- cd release
+- cmake -DCMAKE_BUILD_TYPE=Release ..
 
 script:
-  - make
+- make
 
 before_deploy:
-  - cd ..
+- cd ..
 
 deploy:
-  # We need the compiled files
   skip_cleanup: true
-  on: internal
-  provider: bintray
-  file: .bintray.deploy
-  user: christianfeldmann
-  key:
-    - secure: "mTpDD4hQRlahhvIELsUW3t/OxRaRmjETCGRU/qitk3IIuDfoPvjxZMW/1+ynVPw+XZFbCa0ghe/oMUWsS1VIicU5hIKVt6O3bRU52qjMW785kSTk4KWNLSHt9jrcBxU6XPhmx+EliBuFlTRTYrtbCZlMlmZnF4H4cQqR2+jJtPG0Njt799FVCF4U/AEjnuraHQiJ9soajH+ruFcU4ywu7XLWipTY9d9mB+8nMqlAewEZ+ere8E0cuHZyXbFfI26nhc1zq4lxcjgUOELgS5cd6Ai90FsvVgb3Vt0z2qL3KyyLpNHcUSL43JFEYtn/eDaYysEsLQU0hq0SyF5WdMb0nDEI+cAmEf5aoK0hr8eR7oM0TsZaQEpo3SR7KG0wJptuPRcGCDltBT70YOwn8UtkC6VC1STbKkuj/4ARnCf9reeJw/ZxfgVsUv5Al1gW/8Y7eJ8kO0AZbIPNc56W/Kbu7yPS9vTGbO80c9DYd89/WkSuiL/gzS3mo9SWQPPWwQ6KEY0KOARUWLmbFCnVWcMy0OeDIqO3Rt9+RqTXNi2XLJcFY0kHBp835UHXHxabdbPnSY5H0773IFaX/jg4l2Fua6Df5fNF4gc6Q+LGaw4ExngeUH/iyFUXcwnP7hhuw0Mfd+2hjRuDMVBWetq2FK4idvoijh0qOIvA3XYK6VpiLIY="
-  
-  
+  provider: releases
+  api_key:
+    secure: ZobwRwAywhnRLIJoRNNud5vVHbXLXw/tj3okxa2u4jRqzw4/IDtnMluoOKGkBx/eBg80IoC6Wic7vxZyryD3UWhty9cEn50I8UsnT75flrNrOGQStHl+FrDpWn+OMk3rjNunkXzlq+bn4U+nA4UQSbtNrZ4ONKNMipzrDqJ6KKqya2ONIi3w94lqm0E2P0mboYqGd5LXSTrZ2fHpyakAJaE2RMBhO7vQplgo2jG23P4kT0ivOT7PS4gPf2fvGip6S+VmNiXGC/Pkk6RwecKtIp9KC5o6QwcDnmTkTwV8ExEMLvTVlzaNNCHI3RG1GD78ZQVKD6iI5IEe/JfsUiELPGLUBsmoladWvD6SuMOZijPWkHv+D3KV8WQLTQMczk5oZ8NQhBto05HrMXPcQ55sj9KRQWJ7Yd29y1L/Ghqj9iDXIJXK9xamEgBTsE+AI2mqh+cmE1+H1rwK1K0TcGAixcQANA6QRAtO74a1o20QmwxwQByLY4EW+UnafebWZKBiYFSTmRLgokQHOD5AnsRkKocKEcbEccpnifhIVuL5xveW9Hy1aueVYg0jiyG9FzOuNFRXRmTO2eBEjtZsamoA42U6i1vt0FqvRBISUwBPfJ76NKP1fy+rjltS5GHIuLFNaZlk71cmmsIJVtBJTIqzXmBXiNfbhjeAGLuybeejohY=
+  file: $DEPLOY_FILE
+  on:
+    repo: ChristianFeldmann/libde265
+    tags: true
