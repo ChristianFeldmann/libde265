@@ -66,5 +66,14 @@ else()
 endif()
 
 add_subdirectory (libde265)
-add_subdirectory (dec265)
-add_subdirectory (enc265)
+
+
+option(ONLY_LIB "Only build the libde265" OFF)
+if(${ONLY_LIB})
+  message("Only building libde265")
+else()
+  message("Building libde265 and enc/dec265")  
+  add_subdirectory (dec265)
+  add_subdirectory (enc265)
+endif()
+
