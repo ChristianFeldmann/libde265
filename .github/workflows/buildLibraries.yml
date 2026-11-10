@@ -26,18 +26,20 @@ jobs:
           cd build
           cmake ..
           cmake --build . --parallel 4
-          - name: Upload Artifact
-      - uses: actions/upload-artifact@v7
+      - name: Upload Artifact (Linux)
+        uses: actions/upload-artifact@v7
         if: runner.os	== 'Linux'
         with:
           name: libde265-${{ matrix.os }}.so
           path: build/libde265/libde265.so
-      - uses: actions/upload-artifact@v7
+      - name: Upload Artifact (Windows)
+        uses: actions/upload-artifact@v7
         if: runner.os	== 'Windows'
         with:
           name: libde265-${{ matrix.os }}.dll
           path: build/libde265/libde265.dll
-      - uses: actions/upload-artifact@v7
+      - name: Upload Artifact (MacOS)
+        uses: actions/upload-artifact@v7
         if: runner.os	== 'macOS'
         with:
           name: libde265-${{ matrix.os }}.dylib
