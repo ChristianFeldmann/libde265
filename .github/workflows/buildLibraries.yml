@@ -8,37 +8,38 @@ on:
     types: [created]
 
 jobs:
-  runs-on: ${{ matrix.os }}
-  strategy:
-    matrix:
-      os: [ubuntu-24.04, ubuntu-26.04, ubuntu-24.04-arm, ubuntu-26.04-arm, windows-2022, windows-2025-vs2026, windows-11-vs2026-arm, macos-26-intel, macos-26]
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04, ubuntu-24.04-arm, ubuntu-26.04-arm, windows-2022, windows-2025-vs2026, windows-11-vs2026-arm, macos-26-intel, macos-26]
 
-  steps:
-    - uses: actions/checkout@v7
-    - uses: aseprite/get-ninja@main
-    - uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: ${{ contains(matrix.os, 'arm') && 'arm64' || 'x64' }}
-    - name: Build
-      shell: cmd
-      run: |
-        mkdir build
-        cd build
-        cmake ..
-        cmake --build . --parallel 4
-        - name: Upload Artifact
-    - uses: actions/upload-artifact@v7
-      if: runner.os	== 'Linux'
-      with:
-        name: libde265-${{ matrix.os }}.so
-        path: build/libde265/libde265.so
-    - uses: actions/upload-artifact@v7
-      if: runner.os	== 'Windows'
-      with:
-        name: libde265-${{ matrix.os }}.dll
-        path: build/libde265/libde265.dll
-    - uses: actions/upload-artifact@v7
-      if: runner.os	== 'macOS'
-      with:
-        name: libde265-${{ matrix.os }}.dylib
-        path: build/libde265/libde265.dylib
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aseprite/get-ninja@main
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ contains(matrix.os, 'arm') && 'arm64' || 'x64' }}
+      - name: Build
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build . --parallel 4
+          - name: Upload Artifact
+      - uses: actions/upload-artifact@v7
+        if: runner.os	== 'Linux'
+        with:
+          name: libde265-${{ matrix.os }}.so
+          path: build/libde265/libde265.so
+      - uses: actions/upload-artifact@v7
+        if: runner.os	== 'Windows'
+        with:
+          name: libde265-${{ matrix.os }}.dll
+          path: build/libde265/libde265.dll
+      - uses: actions/upload-artifact@v7
+        if: runner.os	== 'macOS'
+        with:
+          name: libde265-${{ matrix.os }}.dylib
+          path: build/libde265/libde265.dylib
