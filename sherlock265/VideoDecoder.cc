@@ -1,24 +1,31 @@
 /*
- * libde265 example application "sherlock265".
- * Copyright (c) 2013-2014 struktur AG, Dirk Farin <farin@struktur.de>
- *
- * This file is part of sherlock265, an example application using libde265.
- *
- * sherlock265 is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * sherlock265 is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with sherlock265.  If not, see <http://www.gnu.org/licenses/>.
- */
+  libde265 example application "sherlock265".
 
-#include "VideoDecoder.hh"
+  MIT License
+
+  Copyright (c) 2013-2014 struktur AG, Dirk Farin <farin@struktur.de>
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+*/
+
+#include "VideoDecoder.h"
+#include <chrono>
 #ifdef HAVE_VIDEOGFX
 #include <libvideogfx.hh>
 #endif
@@ -38,6 +45,7 @@ VideoDecoder::VideoDecoder()
     img(NULL),
     mNextBuffer(0),
     mFrameCount(0),
+    mFramerate(30),
     mPlayingVideo(false),
     mVideoEnded(false),
     mSingleStep(false),
@@ -108,9 +116,15 @@ void VideoDecoder::singleStepDecoder()
 
 void VideoDecoder::decoder_loop()
 {
+  using std::chrono::steady_clock;
+  using std::chrono::microseconds;
+  using std::chrono::duration_cast;
+
   for (;;)
     {
       if (mPlayingVideo) {
+        auto frame_start_time = steady_clock::now();
+
         mutex.lock();
 
         if (img) {
@@ -134,7 +148,13 @@ void VideoDecoder::decoder_loop()
             else if (more && err == DE265_ERROR_WAITING_FOR_INPUT_DATA) {
               uint8_t buf[4096];
               int buf_size = fread(buf,1,sizeof(buf),mFH);
-              int err = de265_push_data(ctx,buf,buf_size ,0,0);
+              if (buf_size > 0) {
+                int err = de265_push_data(ctx,buf,buf_size ,0,0);
+                (void)err;
+              }
+              if (feof(mFH)) {
+                de265_flush_data(ctx); // signal end-of-stream so trailing frames are emitted
+              }
             }
             else if (!more)
               {
@@ -161,6 +181,16 @@ void VideoDecoder::decoder_loop()
         // process events
 
         QCoreApplication::processEvents();
+
+        // Throttle to target frame rate (skip when we are about to go idle anyway)
+        int framerate = mFramerate.load();
+        if (mPlayingVideo && framerate > 0) {
+          auto target_interval = microseconds(1000000 / framerate);
+          auto elapsed = duration_cast<microseconds>(steady_clock::now() - frame_start_time);
+          if (elapsed < target_interval) {
+            QThread::usleep((target_interval - elapsed).count());
+          }
+        }
       }
       else {
         exec();
@@ -237,7 +267,7 @@ void VideoDecoder::convert_frame_swscale(const de265_image* img, QImage & qimg)
     }
     width = img->get_width();
     height = img->get_height();
-    sws = sws_getContext(width, height, PIX_FMT_YUV420P, width, height, PIX_FMT_BGRA, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+    sws = sws_getContext(width, height, AV_PIX_FMT_YUV420P, width, height, AV_PIX_FMT_BGRA, SWS_FAST_BILINEAR, NULL, NULL, NULL);
   }
 
   int stride[3];
@@ -423,6 +453,10 @@ void VideoDecoder::showSlices(bool flag)
 }
 
 
+void VideoDecoder::setFramerate(int framerate)
+{
+  mFramerate = framerate;
+}
 
 
 void VideoDecoder::init_decoder(const char* filename)

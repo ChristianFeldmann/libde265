@@ -40,6 +40,10 @@ void copy_subimage(uint8_t* dst,int dststride,
 
 
 #ifdef DE265_LOGGING
+// I see that there is a data-race when setting the current_poc (#535),
+// but this and log_poc_start are mainly there to reduce the log noise during
+// debugging. It's nothing that is used in production.
+// TODO: this may change if we add frame-parallel decoding.
 static int current_poc=0;
 static int log_poc_start=-9999; // frame-numbers can be negative
 static bool disable_log[NUMBER_OF_LogModules];
@@ -73,7 +77,9 @@ void disable_logging(enum LogModule module)
 }
 #endif
 
+#ifdef DE265_LOG_TRACE
 static long logcnt[10];
+#endif
 
 #ifdef DE265_LOG_ERROR
 void logerror(enum LogModule module, const char* string, ...)
@@ -232,7 +238,7 @@ void printBlk(const char* title, const uint8_t* data, int blksize, int stride,
 }
 
 
-static void (*debug_image_output_func)(const struct de265_image*, int slot) = NULL;
+static void (*debug_image_output_func)(const struct de265_image*, int slot) = nullptr;
 
 void debug_set_image_output(void (*func)(const struct de265_image*, int slot))
 {

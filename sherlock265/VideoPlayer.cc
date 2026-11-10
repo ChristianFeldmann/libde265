@@ -1,24 +1,30 @@
 /*
- * libde265 example application "sherlock265".
- * Copyright (c) 2013-2014 struktur AG, Dirk Farin <farin@struktur.de>
- *
- * This file is part of sherlock265, an example application using libde265.
- *
- * sherlock265 is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * sherlock265 is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with sherlock265.  If not, see <http://www.gnu.org/licenses/>.
- */
+  libde265 example application "sherlock265".
 
-#include "VideoPlayer.hh"
+  MIT License
+
+  Copyright (c) 2013-2014 struktur AG, Dirk Farin <farin@struktur.de>
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+*/
+
+#include "VideoPlayer.h"
 
 
 VideoPlayer::VideoPlayer(const char* filename)
@@ -42,6 +48,14 @@ VideoPlayer::VideoPlayer(const char* filename)
   QObject::connect(mDecoder,    SIGNAL(displayImage(QImage*)),
                    videoWidget, SLOT(setImage(QImage*)), Qt::QueuedConnection);
 
+
+  QSpinBox* framerateSpinbox = new QSpinBox();
+  framerateSpinbox->setMinimum(1);
+  framerateSpinbox->setMaximum(300);
+  framerateSpinbox->setValue(30);
+  framerateSpinbox->setSuffix(" FPS");
+  QObject::connect(framerateSpinbox, QOverload<int>::of(&QSpinBox::valueChanged),
+                   mDecoder, &VideoDecoder::setFramerate);
 
 
   QPushButton* showCBPartitioningButton = new QPushButton("CB-tree");
@@ -100,6 +114,7 @@ VideoPlayer::VideoPlayer(const char* filename)
   layout->addWidget(startButton, 1,0,1,1);
   layout->addWidget(stopButton,  1,1,1,1);
   layout->addWidget(stepButton,  1,2,1,1);
+  layout->addWidget(framerateSpinbox,        1,3,1,1);
   layout->addWidget(showDecodedImageButton,  1,6,1,1);
   layout->addWidget(showTilesButton,         1,5,1,1);
   layout->addWidget(showSlicesButton,        1,4,1,1);

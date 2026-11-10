@@ -31,6 +31,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
+#include <mutex>
 
 
 // TODO: should be in some vps.c related header
@@ -47,19 +48,24 @@ LIBDE265_API uint32_t de265_get_version_number(void)
     return (LIBDE265_NUMERIC_VERSION);
 }
 
+static uint8_t bcd2dec(uint8_t v)
+{
+  return (v>>4) * 10 + (v & 0x0F);
+}
+
 LIBDE265_API int de265_get_version_number_major(void)
 {
-  return ((LIBDE265_NUMERIC_VERSION)>>24) & 0xFF;
+  return bcd2dec(((LIBDE265_NUMERIC_VERSION)>>24) & 0xFF);
 }
 
 LIBDE265_API int de265_get_version_number_minor(void)
 {
-  return ((LIBDE265_NUMERIC_VERSION)>>16) & 0xFF;
+  return bcd2dec(((LIBDE265_NUMERIC_VERSION)>>16) & 0xFF);
 }
 
 LIBDE265_API int de265_get_version_number_maintenance(void)
 {
-  return ((LIBDE265_NUMERIC_VERSION)>>8) & 0xFF;
+  return bcd2dec(((LIBDE265_NUMERIC_VERSION)>>8) & 0xFF);
 }
 
 
@@ -76,6 +82,9 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
   case DE265_ERROR_OUT_OF_MEMORY: return "out of memory";
   case DE265_ERROR_CODED_PARAMETER_OUT_OF_RANGE: return "coded parameter out of range";
   case DE265_ERROR_IMAGE_BUFFER_FULL: return "DPB/output queue full";
+  case DE265_ERROR_IMAGE_SIZE_EXCEEDS_SECURITY_LIMIT: return "image size exceeds security limit";
+  case DE265_ERROR_NAL_SIZE_EXCEEDS_SECURITY_LIMIT: return "NAL unit size exceeds security limit";
+  case DE265_ERROR_INVALID_ARGUMENT: return "invalid argument";
   case DE265_ERROR_CANNOT_START_THREADPOOL: return "cannot start decoding threads";
   case DE265_ERROR_LIBRARY_INITIALIZATION_FAILED: return "global library initialization failed";
   case DE265_ERROR_LIBRARY_NOT_INITIALIZED: return "cannot free library data (not initialized";
@@ -156,6 +165,28 @@ LIBDE265_API const char* de265_get_error_text(de265_error err)
     return "SPS header missing, cannot decode SEI";
   case DE265_WARNING_COLLOCATED_MOTION_VECTOR_OUTSIDE_IMAGE_AREA:
     return "collocated motion-vector is outside image area";
+  case DE265_WARNING_PCM_BITDEPTH_TOO_LARGE:
+    return "PCM bit-depth too large";
+  case DE265_WARNING_REFERENCE_IMAGE_BIT_DEPTH_DOES_NOT_MATCH:
+    return "Bit-depth of reference image does not match current image";
+  case DE265_WARNING_REFERENCE_IMAGE_SIZE_DOES_NOT_MATCH_SPS:
+    return "Size of reference image does not match current size in SPS";
+  case DE265_WARNING_CHROMA_OF_CURRENT_IMAGE_DOES_NOT_MATCH_SPS:
+    return "Chroma format of current image does not match chroma in SPS";
+  case DE265_WARNING_BIT_DEPTH_OF_CURRENT_IMAGE_DOES_NOT_MATCH_SPS:
+    return "Bit-depth of current image does not match SPS";
+  case DE265_WARNING_REFERENCE_IMAGE_CHROMA_FORMAT_DOES_NOT_MATCH:
+    return "Chroma format of reference image does not match current image";
+  case DE265_WARNING_INVALID_SLICE_HEADER_INDEX_ACCESS:
+    return "Access with invalid slice header index";
+  case DE265_WARNING_INVALID_TU_BLOCK_SPLIT:
+    return "Transform block split below minimum transform size";
+  case DE265_WARNING_RICE_PARAMETER_OUT_OF_RANGE:
+    return "Rice parameter or StatCoeff out of range, clamped";
+  case DE265_WARNING_MAX_NUMBER_OF_SEI_MESSAGES_EXCEEDED:
+    return "number of SEI messages exceeds security limit, dropped";
+  case DE265_WARNING_SLICE_SEGMENT_ADDRESS_NOT_INCREASING:
+    return "slice segment address not increasing within picture, slice segment dropped";
 
   default: return "unknown error";
   }
@@ -168,12 +199,22 @@ LIBDE265_API int de265_isOK(de265_error err)
 
 
 
-ALIGNED_8(static de265_sync_int de265_init_count) = 0;
+static int de265_init_count;
+
+static std::mutex& de265_init_mutex()
+{
+  static std::mutex de265_init_mutex;
+  return de265_init_mutex;
+}
+
 
 LIBDE265_API de265_error de265_init()
 {
-  int cnt = de265_sync_add_and_fetch(&de265_init_count,1);
-  if (cnt>1) {
+  std::lock_guard<std::mutex> lock(de265_init_mutex());
+
+  de265_init_count++;
+
+  if (de265_init_count > 1) {
     // we are not the first -> already initialized
 
     return DE265_OK;
@@ -183,9 +224,11 @@ LIBDE265_API de265_error de265_init()
   // do initializations
 
   init_scan_orders();
+  pps_scan_cache_init();
 
   if (!alloc_and_init_significant_coeff_ctxIdx_lookupTable()) {
-    de265_sync_sub_and_fetch(&de265_init_count,1);
+    pps_scan_cache_free();
+    de265_init_count--;
     return DE265_ERROR_LIBRARY_INITIALIZATION_FAILED;
   }
 
@@ -194,14 +237,17 @@ LIBDE265_API de265_error de265_init()
 
 LIBDE265_API de265_error de265_free()
 {
-  int cnt = de265_sync_sub_and_fetch(&de265_init_count,1);
-  if (cnt<0) {
-    de265_sync_add_and_fetch(&de265_init_count,1);
+  std::lock_guard<std::mutex> lock(de265_init_mutex());
+
+  if (de265_init_count<=0) {
     return DE265_ERROR_LIBRARY_NOT_INITIALIZED;
   }
 
-  if (cnt==0) {
+  de265_init_count--;
+
+  if (de265_init_count==0) {
     free_significant_coeff_ctxIdx_lookupTable();
+    pps_scan_cache_free();
   }
 
   return DE265_OK;
@@ -212,22 +258,22 @@ LIBDE265_API de265_decoder_context* de265_new_decoder()
 {
   de265_error init_err = de265_init();
   if (init_err != DE265_OK) {
-    return NULL;
+    return nullptr;
   }
 
   decoder_context* ctx = new decoder_context;
   if (!ctx) {
     de265_free();
-    return NULL;
+    return nullptr;
   }
 
-  return (de265_decoder_context*)ctx;
+  return reinterpret_cast<de265_decoder_context*>(ctx);
 }
 
 
 LIBDE265_API de265_error de265_free_decoder(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   ctx->stop_thread_pool();
 
@@ -239,7 +285,7 @@ LIBDE265_API de265_error de265_free_decoder(de265_decoder_context* de265ctx)
 
 LIBDE265_API de265_error de265_start_worker_threads(de265_decoder_context* de265ctx, int number_of_threads)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   if (number_of_threads > MAX_THREADS) {
     number_of_threads = MAX_THREADS;
@@ -262,10 +308,10 @@ LIBDE265_API de265_error de265_start_worker_threads(de265_decoder_context* de265
 LIBDE265_API de265_error de265_decode_data(de265_decoder_context* de265ctx,
                                            const void* data8, int len)
 {
-  //decoder_context* ctx = (decoder_context*)de265ctx;
+  //decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
   de265_error err;
   if (len > 0) {
-    err = de265_push_data(de265ctx, data8, len, 0, NULL);
+    err = de265_push_data(de265ctx, data8, len, 0, nullptr);
   } else {
     err = de265_flush_data(de265ctx);
   }
@@ -293,6 +339,7 @@ LIBDE265_API de265_error de265_decode_data(de265_decoder_context* de265ctx,
 }
 #endif
 
+#if 0
 static void dumpdata(const void* data, int len)
 {
   for (int i=0;i<len;i++) {
@@ -300,14 +347,15 @@ static void dumpdata(const void* data, int len)
   }
   printf("\n");
 }
+#endif
 
 
 LIBDE265_API de265_error de265_push_data(de265_decoder_context* de265ctx,
                                          const void* data8, int len,
                                          de265_PTS pts, void* user_data)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
-  uint8_t* data = (uint8_t*)data8;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(data8);
 
   //printf("push data (size %d)\n",len);
   //dumpdata(data8,16);
@@ -320,8 +368,8 @@ LIBDE265_API de265_error de265_push_NAL(de265_decoder_context* de265ctx,
                                         const void* data8, int len,
                                         de265_PTS pts, void* user_data)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
-  uint8_t* data = (uint8_t*)data8;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(data8);
 
   //printf("push NAL (size %d)\n",len);
   //dumpdata(data8,16);
@@ -332,7 +380,7 @@ LIBDE265_API de265_error de265_push_NAL(de265_decoder_context* de265ctx,
 
 LIBDE265_API de265_error de265_decode(de265_decoder_context* de265ctx, int* more)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   return ctx->decode(more);
 }
@@ -340,7 +388,7 @@ LIBDE265_API de265_error de265_decode(de265_decoder_context* de265ctx, int* more
 
 LIBDE265_API void        de265_push_end_of_NAL(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   ctx->nal_parser.flush_data();
 }
@@ -350,7 +398,7 @@ LIBDE265_API void        de265_push_end_of_frame(de265_decoder_context* de265ctx
 {
   de265_push_end_of_NAL(de265ctx);
 
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
   ctx->nal_parser.mark_end_of_frame();
 }
 
@@ -359,7 +407,7 @@ LIBDE265_API de265_error de265_flush_data(de265_decoder_context* de265ctx)
 {
   de265_push_end_of_NAL(de265ctx);
 
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   ctx->nal_parser.flush_data();
   ctx->nal_parser.mark_end_of_stream();
@@ -370,7 +418,7 @@ LIBDE265_API de265_error de265_flush_data(de265_decoder_context* de265ctx)
 
 LIBDE265_API void de265_reset(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   //printf("--- reset ---\n");
 
@@ -391,21 +439,21 @@ LIBDE265_API const struct de265_image* de265_get_next_picture(de265_decoder_cont
 
 LIBDE265_API const struct de265_image* de265_peek_next_picture(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   if (ctx->num_pictures_in_output_queue()>0) {
     de265_image* img = ctx->get_next_picture_in_output_queue();
     return img;
   }
   else {
-    return NULL;
+    return nullptr;
   }
 }
 
 
 LIBDE265_API void de265_release_next_picture(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   // no active output picture -> ignore release request
 
@@ -431,45 +479,45 @@ LIBDE265_API void de265_release_next_picture(de265_decoder_context* de265ctx)
 
 LIBDE265_API int  de265_get_highest_TID(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
   return ctx->get_highest_TID();
 }
 
 LIBDE265_API int  de265_get_current_TID(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
   return ctx->get_current_TID();
 }
 
 LIBDE265_API void de265_set_limit_TID(de265_decoder_context* de265ctx,int max_tid)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
   ctx->set_limit_TID(max_tid);
 }
 
 LIBDE265_API void de265_set_framerate_ratio(de265_decoder_context* de265ctx,int percent)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
   ctx->set_framerate_ratio(percent);
 }
 
 LIBDE265_API int  de265_change_framerate(de265_decoder_context* de265ctx,int more)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
   return ctx->change_framerate(more);
 }
 
 
 LIBDE265_API de265_error de265_get_warning(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   return ctx->get_warning();
 }
 
 LIBDE265_API void de265_set_parameter_bool(de265_decoder_context* de265ctx, enum de265_param param, int value)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   switch (param)
     {
@@ -508,7 +556,7 @@ LIBDE265_API void de265_set_parameter_bool(de265_decoder_context* de265ctx, enum
 
 LIBDE265_API void de265_set_parameter_int(de265_decoder_context* de265ctx, enum de265_param param, int value)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   switch (param)
     {
@@ -529,7 +577,7 @@ LIBDE265_API void de265_set_parameter_int(de265_decoder_context* de265ctx, enum 
       break;
 
     case DE265_DECODER_PARAM_ACCELERATION_CODE:
-      ctx->set_acceleration_functions((enum de265_acceleration)value);
+      ctx->set_acceleration_functions(static_cast<enum de265_acceleration>(value));
       break;
 
     default:
@@ -543,7 +591,7 @@ LIBDE265_API void de265_set_parameter_int(de265_decoder_context* de265ctx, enum 
 
 LIBDE265_API int de265_get_parameter_bool(de265_decoder_context* de265ctx, enum de265_param param)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   switch (param)
     {
@@ -574,9 +622,56 @@ LIBDE265_API int de265_get_parameter_bool(de265_decoder_context* de265ctx, enum 
 }
 
 
+static const de265_security_limits disabled_security_limits = {
+  1,    // version
+  0,    // max_image_size_pixels
+  0,    // max_NAL_size_bytes
+  0     // max_SEI_messages
+};
+
+
+LIBDE265_API de265_security_limits* de265_get_security_limits(de265_decoder_context* de265ctx)
+{
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
+  return &ctx->param_security_limits;
+}
+
+
+// Copy security limits field by field, but only those fields that exist in both
+// structs, i.e. up to min(dst->version, src->version). This keeps copying safe
+// when 'src' was compiled against a different (older or newer) header version
+// than 'dst'. Fields not covered by the common version keep their value in 'dst'.
+static void copy_security_limits(de265_security_limits* dst, const de265_security_limits* src)
+{
+  uint8_t version = (dst->version < src->version) ? dst->version : src->version;
+
+  if (version >= 1) {
+    dst->max_image_size_pixels = src->max_image_size_pixels;
+    dst->max_NAL_size_bytes    = src->max_NAL_size_bytes;
+    dst->max_SEI_messages      = src->max_SEI_messages;
+  }
+}
+
+
+LIBDE265_API void de265_set_security_limits(de265_decoder_context* de265ctx,
+                                            const de265_security_limits* limits)
+{
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
+  if (limits) {
+    copy_security_limits(&ctx->param_security_limits, limits);
+  }
+}
+
+
+LIBDE265_API const de265_security_limits* de265_get_disabled_security_limits()
+{
+  return &disabled_security_limits;
+}
+
+
 LIBDE265_API int de265_get_number_of_input_bytes_pending(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   return ctx->nal_parser.bytes_in_input_queue();
 }
@@ -584,7 +679,7 @@ LIBDE265_API int de265_get_number_of_input_bytes_pending(de265_decoder_context* 
 
 LIBDE265_API int de265_get_number_of_NAL_units_pending(de265_decoder_context* de265ctx)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   return ctx->nal_parser.number_of_NAL_units_pending();
 }
@@ -640,7 +735,7 @@ LIBDE265_API const uint8_t* de265_get_image_plane(const de265_image* img, int ch
 
   uint8_t* data = img->pixels_confwin[channel];
 
-  if (stride) *stride = img->get_image_stride(channel) * ((de265_get_bits_per_pixel(img, channel)+7) / 8);
+  if (stride) *stride = static_cast<int>(img->get_image_stride(channel) * ((de265_get_bits_per_pixel(img, channel)+7) / 8));
 
   return data;
 }
@@ -656,14 +751,14 @@ LIBDE265_API void de265_set_image_plane(de265_image* img, int cIdx, void* mem, i
 {
   // The internal "stride" is the number of pixels per line.
   stride = stride / ((de265_get_bits_per_pixel(img, cIdx)+7) / 8);
-  img->set_image_plane(cIdx, (uint8_t*)mem, stride, userdata);
+  img->set_image_plane(cIdx, static_cast<uint8_t*>(mem), stride, userdata);
 }
 
 LIBDE265_API void de265_set_image_allocation_functions(de265_decoder_context* de265ctx,
                                                        de265_image_allocation* allocfunc,
                                                        void* userdata)
 {
-  decoder_context* ctx = (decoder_context*)de265ctx;
+  decoder_context* ctx = reinterpret_cast<decoder_context*>(de265ctx);
 
   ctx->set_image_allocation_functions(allocfunc, userdata);
 }
@@ -699,4 +794,25 @@ LIBDE265_API void de265_get_image_NAL_header(const struct de265_image* img,
   if (nuh_layer_id)    *nuh_layer_id    = img->nal_hdr.nuh_layer_id;
   if (nuh_temporal_id) *nuh_temporal_id = img->nal_hdr.nuh_temporal_id;
 }
+
+LIBDE265_API int de265_get_image_full_range_flag(const struct de265_image* img)
+{
+  return img->get_sps().vui.video_full_range_flag;
+}
+
+LIBDE265_API int de265_get_image_colour_primaries(const struct de265_image* img)
+{
+  return img->get_sps().vui.colour_primaries;
+}
+
+LIBDE265_API int de265_get_image_transfer_characteristics(const struct de265_image* img)
+{
+  return img->get_sps().vui.transfer_characteristics;
+}
+
+LIBDE265_API int de265_get_image_matrix_coefficients(const struct de265_image* img)
+{
+  return img->get_sps().vui.matrix_coeffs;
+}
+
 }

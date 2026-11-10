@@ -110,8 +110,8 @@ void decode_quantization_parameters(thread_context* tctx, int xC,int yC,
   if (tctx->img->available_zscan(xQG,yQG, xQG-1,yQG)) {
     int xTmp = (xQG-1) >> sps.Log2MinTrafoSize;
     int yTmp = (yQG  ) >> sps.Log2MinTrafoSize;
-    int minTbAddrA = pps.MinTbAddrZS[xTmp + yTmp*sps.PicWidthInTbsY];
-    int ctbAddrA = minTbAddrA >> (2 * (sps.Log2CtbSizeY-sps.Log2MinTrafoSize));
+    int minTbAddrA = pps.scan->MinTbAddrZS[xTmp + yTmp*sps.PicWidthInTbsY];
+    uint32_t ctbAddrA = minTbAddrA >> (2 * (sps.Log2CtbSizeY-sps.Log2MinTrafoSize));
     if (ctbAddrA == tctx->CtbAddrInTS) {
       qPYA = tctx->img->get_QPY(xQG-1,yQG);
     }
@@ -126,8 +126,8 @@ void decode_quantization_parameters(thread_context* tctx, int xC,int yC,
   if (tctx->img->available_zscan(xQG,yQG, xQG,yQG-1)) {
     int xTmp = (xQG  ) >> sps.Log2MinTrafoSize;
     int yTmp = (yQG-1) >> sps.Log2MinTrafoSize;
-    int minTbAddrB = pps.MinTbAddrZS[xTmp + yTmp*sps.PicWidthInTbsY];
-    int ctbAddrB = minTbAddrB >> (2 * (sps.Log2CtbSizeY-sps.Log2MinTrafoSize));
+    uint32_t minTbAddrB = pps.scan->MinTbAddrZS[xTmp + yTmp*sps.PicWidthInTbsY];
+    uint32_t ctbAddrB = minTbAddrB >> (2 * (sps.Log2CtbSizeY-sps.Log2MinTrafoSize));
     if (ctbAddrB == tctx->CtbAddrInTS) {
       qPYB = tctx->img->get_QPY(xQG,yQG-1);
     }
@@ -145,6 +145,8 @@ void decode_quantization_parameters(thread_context* tctx, int xC,int yC,
 
   int QPY = ((qPY_PRED + tctx->CuQpDelta + 52+2*sps.QpBdOffset_Y) %
              (52 + sps.QpBdOffset_Y)) - sps.QpBdOffset_Y;
+
+  assert(QPY >= -sps.QpBdOffset_Y && QPY <= 51);
 
   tctx->qPYPrime = QPY + sps.QpBdOffset_Y;
 
@@ -169,7 +171,14 @@ void decode_quantization_parameters(thread_context* tctx, int xC,int yC,
   //printf("q: %d %d\n",qPiCb, qPCb);
 
   tctx->qPCbPrime = qPCb + sps.QpBdOffset_C;
+  if (tctx->qPCbPrime<0) {
+    tctx->qPCbPrime = 0;
+  }
+
   tctx->qPCrPrime = qPCr + sps.QpBdOffset_C;
+  if (tctx->qPCrPrime<0) {
+    tctx->qPCrPrime = 0;
+  }
 
   /*
   printf("Q: %d (%d %d %d / %d %d) %d %d %d\n",QPY,
@@ -236,18 +245,32 @@ void cross_comp_pred(const thread_context* tctx, int32_t* residual, int nT)
 {
   const int BitDepthC = tctx->img->get_sps().BitDepth_C;
   const int BitDepthY = tctx->img->get_sps().BitDepth_Y;
+  const int ResScaleVal = tctx->ResScaleVal;
 
-  for (int y=0;y<nT;y++)
-    for (int x=0;x<nT;x++) {
-      /* TODO: the most usual case is definitely BitDepthY == BitDepthC, in which case
-         we could just omit two shifts. The second most common case is probably
-         BitDepthY>BitDepthC, for which we could also eliminate one shift. The remaining
-         case is also one shift only.
-      */
+  /* (8.6.6): r[x][y] += ( ResScaleVal * ( ( rY[x][y] << BitDepthC ) >> BitDepthY ) ) >> 3
+     Both shifts operate on a signed value, so together they are a single signed rescaling
+     by (BitDepthC - BitDepthY). It must not be evaluated on an unsigned type: the right
+     shift would then be logical and turn every negative luma residual into a large
+     positive value. Shifting left is expressed as a multiplication because shifting a
+     negative value left is undefined behaviour before C++20.
+  */
 
-      residual[y*nT+x] += (tctx->ResScaleVal *
-                           ((tctx->residual_luma[y*nT+x] << BitDepthC ) >> BitDepthY ) ) >> 3;
-    }
+  const int shift = BitDepthY - BitDepthC;
+
+  if (shift >= 0) {
+    for (int y=0;y<nT;y++)
+      for (int x=0;x<nT;x++) {
+        residual[y*nT+x] += (ResScaleVal * (tctx->residual_luma[y*nT+x] >> shift)) >> 3;
+      }
+  }
+  else {
+    const int32_t factor = 1 << (-shift);
+
+    for (int y=0;y<nT;y++)
+      for (int x=0;x<nT;x++) {
+        residual[y*nT+x] += (ResScaleVal * (tctx->residual_luma[y*nT+x] * factor)) >> 3;
+      }
+  }
 }
 
 
@@ -458,20 +481,23 @@ void scale_coefficients_internal(thread_context* tctx,
       const int offset = (1<<(bdShift-1));
       const int fact = m_x_y * levelScale[qP%6] << (qP/6);
 
-      for (int i=0;i<tctx->nCoeff[cIdx];i++) {
-
-        // usually, this needs to be 64bit, but because we modify the shift above, we can use 16 bit
-        int32_t currCoeff  = tctx->coeffList[cIdx][i];
-
-        //logtrace(LogTransform,"coefficient[%d] = %d\n",tctx->coeffPos[cIdx][i],
-        //tctx->coeffList[cIdx][i]);
-
-        currCoeff = Clip3(-32768,32767,
-                          ( (currCoeff * fact + offset ) >> bdShift));
-
-        //logtrace(LogTransform," -> %d\n",currCoeff);
-
-        tctx->coeffBuf[ tctx->coeffPos[cIdx][i] ] = currCoeff;
+      // Fast path: when coeffList[i]*fact (|coeffList| <= 32767) fits in int32,
+      // the dequant can run in int32 SIMD. Otherwise (very high QP, high bit
+      // depth) fall back to the scalar int64 loop.
+      if (fact <= 32767) {
+        tctx->decctx->acceleration.dequant_coeff_block(tctx->coeffBuf,
+                                                       tctx->coeffList[cIdx],
+                                                       tctx->coeffPos[cIdx],
+                                                       tctx->nCoeff[cIdx],
+                                                       fact, offset, bdShift);
+      }
+      else {
+        for (int i=0;i<tctx->nCoeff[cIdx];i++) {
+          int64_t currCoeff  = tctx->coeffList[cIdx][i];
+          currCoeff = Clip3(-32768,32767,
+                            ( (currCoeff * fact + offset ) >> bdShift));
+          tctx->coeffBuf[ tctx->coeffPos[cIdx][i] ] = currCoeff;
+        }
       }
     }
     else {
@@ -479,6 +505,11 @@ void scale_coefficients_internal(thread_context* tctx,
 
       const uint8_t* sclist;
       int matrixID = cIdx;
+
+      if (nT==32) {
+        matrixID=0;
+      }
+
       if (!intra) {
         if (nT<32) { matrixID += 3; }
         else { matrixID++; }
@@ -489,15 +520,13 @@ void scale_coefficients_internal(thread_context* tctx,
       case  8: sclist = &pps.scaling_list.ScalingFactor_Size1[matrixID][0][0]; break;
       case 16: sclist = &pps.scaling_list.ScalingFactor_Size2[matrixID][0][0]; break;
       case 32: sclist = &pps.scaling_list.ScalingFactor_Size3[matrixID][0][0]; break;
-      default: assert(0);
+      default: assert(0); sclist = nullptr;
       }
 
       for (int i=0;i<tctx->nCoeff[cIdx];i++) {
         int pos = tctx->coeffPos[cIdx][i];
-        int x = pos%nT;
-        int y = pos/nT;
 
-        const int m_x_y = sclist[x+y*nT];
+        const int m_x_y = sclist[pos];
         const int fact = m_x_y * levelScale[qP%6] << (qP/6);
 
         int64_t currCoeff  = tctx->coeffList[cIdx][i];
@@ -521,7 +550,9 @@ void scale_coefficients_internal(thread_context* tctx,
       logtrace(LogTransform,"*\n");
     }
 
+#ifdef DE265_LOG_TRACE
     int bdShift2 = (cIdx==0) ? 20-sps.BitDepth_Y : 20-sps.BitDepth_C;
+#endif
 
     logtrace(LogTransform,"bdShift2=%d\n",bdShift2);
 
@@ -532,8 +563,8 @@ void scale_coefficients_internal(thread_context* tctx,
 
       int extended_precision_processing_flag = 0;
       int Log2nTbS = Log2(nT);
-      int bdShift = libde265_max( 20 - bit_depth, extended_precision_processing_flag ? 11 : 0 );
-      int tsShift = (extended_precision_processing_flag ? libde265_min( 5, bdShift - 2 ) : 5 )
+      int bdShift = std::max( 20 - bit_depth, extended_precision_processing_flag ? 11 : 0 );
+      int tsShift = (extended_precision_processing_flag ? std::min( 5, bdShift - 2 ) : 5 )
         + Log2nTbS;
 
       if (rotateCoeffs) {
@@ -645,7 +676,7 @@ void scale_coefficients(thread_context* tctx,
 
 //#define QUANT_IQUANT_SHIFT    20 // Q(QP%6) * IQ(QP%6) = 2^20
 #define QUANT_SHIFT           14 // Q(4) = 2^14
-//#define SCALE_BITS            15 // Inherited from TMuC, pressumably for fractional bit estimates in RDOQ
+//#define SCALE_BITS            15 // Inherited from TMuC, presumably for fractional bit estimates in RDOQ
 #define MAX_TR_DYNAMIC_RANGE  15 // Maximum transform dynamic range (excluding sign bit)
 
 
@@ -674,7 +705,6 @@ void quant_coefficients(//encoder_context* ectx,
   int rnd = (intra ? 171 : 85) << (qBits-9);
 
   int x, y;
-  int uiAcSum = 0;
 
   int nStride = (1<<log2TrSize);
 
@@ -687,8 +717,7 @@ void quant_coefficients(//encoder_context* ectx,
       //logtrace(LogTransform,"(%d,%d) %d -> ", x,y,level);
       sign   = (level < 0 ? -1: 1);
 
-      level = (abs_value(level) * uiQ + rnd ) >> qBits;
-      uiAcSum += level;
+      level = (std::abs(level) * uiQ + rnd ) >> qBits;
       level *= sign;
       out_coeff[blockPos] = Clip3(-32768, 32767, level);
       //logtrace(LogTransform,"%d\n", out_coeff[blockPos]);
@@ -709,7 +738,7 @@ void dequant_coefficients(int16_t* out_coeff,
   const int offset = (1<<(bdShift-1));
   const int fact = m_x_y * levelScale[qP%6] << (qP/6);
 
-  int blkSize = (1<<log2TrSize);
+  //int blkSize = (1<<log2TrSize);
   int nCoeff  = (1<<(log2TrSize<<1));
 
   for (int i=0;i<nCoeff;i++) {

@@ -24,6 +24,7 @@
 #include "libde265/encoder/encoder-context.h"
 #include "libde265/encoder/algo/tb-split.h"
 #include "libde265/encoder/algo/coding-options.h"
+#include "libde265/encoder/encoder-intrapred.h"
 #include <assert.h>
 #include <limits>
 #include <math.h>
@@ -150,7 +151,7 @@ float estim_TB_bitrate(const encoder_context* ectx,
 
         float distortion=0;
         for (int i=0;i<blkSize*blkSize;i++) {
-          distortion += abs_value((int)coeffs[i]);
+          distortion += std::abs((int)coeffs[i]);
         }
 
         return distortion;
@@ -270,7 +271,7 @@ Algo_TB_IntraPredMode_BruteForce::analyze(encoder_context* ectx,
   }
 
   assert(false);
-  return nullptr;
+  return NULL;
 }
 
 
@@ -389,7 +390,7 @@ Algo_TB_IntraPredMode_MinResidual::analyze(encoder_context* ectx,
   }
 
   assert(false);
-  return nullptr;
+  return NULL;
 }
 
 static bool sortDistortions(std::pair<enum IntraPredMode,float> i,
@@ -463,7 +464,7 @@ Algo_TB_IntraPredMode_FastBrute::analyze(encoder_context* ectx,
     CodingOptions<enc_tb> options(ectx, tb, ctxModel);
     std::vector<CodingOption<enc_tb> >  option;
 
-    for (int i=0;i<distortions.size();i++) {
+    for (size_t i=0;i<distortions.size();i++) {
       enum IntraPredMode intraMode  = (IntraPredMode)distortions[i].first;
       if (!isPredModeEnabled(intraMode)) { continue; }
 
@@ -527,5 +528,5 @@ Algo_TB_IntraPredMode_FastBrute::analyze(encoder_context* ectx,
   }
 
   assert(false);
-  return nullptr;
+  return NULL;
 }

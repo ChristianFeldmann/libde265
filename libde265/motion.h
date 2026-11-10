@@ -22,6 +22,7 @@
 #define DE265_MOTION_H
 
 #include <stdint.h>
+#include "slice.h"
 
 class base_context;
 class slice_segment_header;
@@ -37,7 +38,7 @@ class PBMotion
 {
  public:
   uint8_t predFlag[2];  // which of the two vectors is actually used
-  int8_t  refIdx[2];    // index into RefPicList
+  uint8_t refIdx[2];    // index into RefPicList (valid when predFlag set)
   MotionVector  mv[2];  // the absolute motion vectors
 
   bool operator==(const PBMotion&) const;
@@ -48,7 +49,7 @@ class PBMotionCoding
 {
  public:
   // index into RefPicList
-  int8_t  refIdx[2];
+  uint8_t refIdx[2];
 
   // motion vector difference
   int16_t mvd[2][2]; // [L0/L1][x/y]  (only in top left position - ???)
@@ -72,12 +73,6 @@ void get_merge_candidate_list(base_context* ctx,
                               int xC,int yC, int xP,int yP,
                               int nCS, int nPbW,int nPbH, int partIdx,
                               PBMotion* mergeCandList);
-
-void get_merge_candidate_list_from_tree(class encoder_context* ectx,
-                                        const slice_segment_header* shdr,
-                                        int xC,int yC, int xP,int yP,
-                                        int nCS, int nPbW,int nPbH, int partIdx,
-                                        PBMotion* mergeCandList);
 
 /*
 int derive_spatial_merging_candidates(const struct de265_image* img,
@@ -112,5 +107,25 @@ void fill_luma_motion_vector_predictors(base_context* ctx,
 void decode_prediction_unit(base_context* ctx,const slice_segment_header* shdr,
                             de265_image* img, const PBMotionCoding& motion,
                             int xC,int yC, int xB,int yB, int nCS, int nPbW,int nPbH, int partIdx);
+
+
+
+
+class MotionVectorAccess
+{
+public:
+  virtual enum PartMode get_PartMode(int x,int y) const = 0;
+  virtual const PBMotion& get_mv_info(int x,int y) const = 0;
+};
+
+
+void get_merge_candidate_list_without_step_9(base_context* ctx,
+                                             const slice_segment_header* shdr,
+                                             const MotionVectorAccess& mvaccess,
+                                             de265_image* img,
+                                             int xC,int yC, int xP,int yP,
+                                             int nCS, int nPbW,int nPbH, int partIdx,
+                                             int max_merge_idx,
+                                             PBMotion* mergeCandList);
 
 #endif

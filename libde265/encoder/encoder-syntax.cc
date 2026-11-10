@@ -22,6 +22,7 @@
 
 #include "encoder-syntax.h"
 #include "encoder-context.h"
+#include "encoder-intrapred.h"
 #include "slice.h"
 #include "scan.h"
 #include "intrapred.h"
@@ -1023,7 +1024,7 @@ void encode_residual(encoder_context* ectx,
 
       int newLastGreater1ScanPos=-1;
 
-      int lastGreater1Coefficient = libde265_min(8,nCoefficients);
+      int lastGreater1Coefficient = std::min(8,nCoefficients);
       for (int c=0;c<lastGreater1Coefficient;c++) {
         int greater1_flag = (coeff_value[c]>1);
 
@@ -1362,8 +1363,8 @@ void encode_mvd(encoder_context* ectx,
                 CABAC_encoder* cabac,
                 const int16_t mvd[2])
 {
-  int mvd0abs = abs_value(mvd[0]);
-  int mvd1abs = abs_value(mvd[1]);
+  int mvd0abs = std::abs(mvd[0]);
+  int mvd1abs = std::abs(mvd[1]);
 
   int mvd0_greater_0 = !!(mvd0abs);
   int mvd1_greater_0 = !!(mvd1abs);
@@ -1430,9 +1431,9 @@ void encode_prediction_unit(encoder_context* ectx,
 
     /*
 enum InterPredIdc
-    PRED_L0=0,
-    PRED_L1=1,
-    PRED_BI=2
+    InterPredIdc::PRED_L0=0,
+    InterPredIdc::PRED_L1=1,
+    InterPredIdc::PRED_BI=2
     */
   }
 }

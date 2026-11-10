@@ -26,12 +26,10 @@
 #endif
 
 #include <stdint.h>
-#ifdef HAVE_STDBOOL_H
-#include <stdbool.h>
-#endif
 
 #include "libde265/bitstream.h"
 #include "libde265/cabac.h"
+#include "libde265/de265.h"
 
 struct nal_header {
   nal_header() {
@@ -40,7 +38,7 @@ struct nal_header {
     nuh_temporal_id = 0;
   }
 
-  void read(bitreader* reader);
+  de265_error read(bitreader* reader);
   void write(CABAC_encoder& writer) const;
 
   void set(int unit_type, int layer_id=0, int temporal_id=0) {

@@ -25,32 +25,29 @@
 #include "libde265/pps.h"
 #include "libde265/nal.h"
 #include "libde265/util.h"
+#include "libde265/de265.h"
 
 #include <vector>
 #include <queue>
-
-#define DE265_NAL_FREE_LIST_SIZE 16
-#define DE265_SKIPPED_BYTES_INITIAL_SIZE 16
+#include <memory>
 
 
 class NAL_unit {
  public:
-  NAL_unit();
+  NAL_unit() = default;
   ~NAL_unit();
 
   nal_header header;
 
-  de265_PTS  pts;
-  void*      user_data;
+  de265_PTS  pts = 0;
+  void*      user_data = nullptr;
 
-
-  void clear();
 
   // --- rbsp data ---
 
-  LIBDE265_CHECK_RESULT bool resize(int new_size);
-  LIBDE265_CHECK_RESULT bool append(const unsigned char* data, int n);
-  LIBDE265_CHECK_RESULT bool set_data(const unsigned char* data, int n);
+  [[nodiscard]] bool resize(int new_size);
+  [[nodiscard]] bool append(const unsigned char* data, int n);
+  [[nodiscard]] bool set_data(const unsigned char* data, int n);
 
   int size() const { return data_size; }
   void set_size(int s) { data_size=s; }
@@ -60,15 +57,15 @@ class NAL_unit {
 
   // --- skipped stuffing bytes ---
 
-  int num_skipped_bytes_before(int byte_position, int headerLength) const;
-  int  num_skipped_bytes() const { return skipped_bytes.size(); }
+  uint32_t num_skipped_bytes_before(uint32_t byte_position, uint32_t headerLength) const;
+  uint32_t num_skipped_bytes() const { return skipped_bytes.size(); }
 
   //void clear_skipped_bytes() { skipped_bytes.clear(); }
 
   /* Mark a byte as skipped. It is assumed that the byte is already removed
      from the input data. The NAL data is not modified.
   */
-  void insert_skipped_byte(int pos);
+  void insert_skipped_byte(uint32_t pos);
 
   /* Remove all stuffing bytes from NAL data. The NAL data is modified and
      the removed bytes are marked as skipped bytes.
@@ -76,11 +73,11 @@ class NAL_unit {
   void remove_stuffing_bytes();
 
  private:
-  unsigned char* nal_data;
-  int data_size;
-  int capacity;
+  unsigned char* nal_data = nullptr;
+  int data_size = 0;
+  int capacity = 0;
 
-  std::vector<int> skipped_bytes; // up to position[x], there were 'x' skipped bytes
+  std::vector<uint32_t> skipped_bytes; // up to position[x], there were 'x' skipped bytes
 };
 
 
@@ -90,13 +87,17 @@ class NAL_Parser
   NAL_Parser();
   ~NAL_Parser();
 
+  // Point the parser at the live security limits struct so that runtime
+  // changes (via de265_get_security_limits()) take effect immediately.
+  void set_security_limits(const de265_security_limits* limits) { m_security_limits = limits; }
+
   de265_error push_data(const unsigned char* data, int len,
-                        de265_PTS pts, void* user_data = NULL);
+                        de265_PTS pts, void* user_data = nullptr);
 
   de265_error push_NAL(const unsigned char* data, int len,
-                       de265_PTS pts, void* user_data = NULL);
+                       de265_PTS pts, void* user_data = nullptr);
 
-  NAL_unit*   pop_from_NAL_queue();
+  std::unique_ptr<NAL_unit> pop_from_NAL_queue();
   de265_error flush_data();
   void        mark_end_of_stream() { end_of_stream=true; }
   void        mark_end_of_frame() { end_of_frame=true; }
@@ -118,7 +119,11 @@ class NAL_Parser
     return NAL_queue.size();
   }
 
-  void free_NAL_unit(NAL_unit*);
+  // Release a NAL. Takes ownership by value, so a move transfers the object here
+  // and leaves the caller holding nullptr; a redundant release therefore passes
+  // nullptr and is a harmless no-op, which is what makes a double release
+  // impossible to express.
+  void free_NAL_unit(std::unique_ptr<NAL_unit> nal);
 
 
   int get_NAL_queue_length() const { return NAL_queue.size(); }
@@ -128,26 +133,32 @@ class NAL_Parser
  private:
   // byte-stream level
 
-  bool end_of_stream; // data in pending_input_data is end of stream
-  bool end_of_frame;  // data in pending_input_data is end of frame
-  int  input_push_state;
+  bool end_of_stream = false; // data in pending_input_data is end of stream
+  bool end_of_frame = false;  // data in pending_input_data is end of frame
+  int  input_push_state = 0;
 
-  NAL_unit* pending_input_NAL;
+  std::unique_ptr<NAL_unit> pending_input_NAL;
+
+  const de265_security_limits* m_security_limits = nullptr;
 
 
   // NAL level
 
-  std::queue<NAL_unit*> NAL_queue;  // enqueued NALs have suffing bytes removed
-  int nBytes_in_NAL_queue; // data bytes currently in NAL_queue
+  std::queue<std::unique_ptr<NAL_unit>> NAL_queue;  // enqueued NALs have suffing bytes removed
+  int nBytes_in_NAL_queue = 0; // data bytes currently in NAL_queue
 
-  void push_to_NAL_queue(NAL_unit*);
+  void push_to_NAL_queue(std::unique_ptr<NAL_unit>);
+
+  // Returns true if a NAL unit of the given size is within the configured
+  // security limit (or if no limit is set).
+  bool nal_size_within_limit(int64_t nal_size) const {
+    return m_security_limits == nullptr ||
+           m_security_limits->max_NAL_size_bytes == 0 ||
+           nal_size <= m_security_limits->max_NAL_size_bytes;
+  }
 
 
-  // pool of unused NAL memory
-
-  std::vector<NAL_unit*> NAL_free_list;  // maximum size: DE265_NAL_FREE_LIST_SIZE
-
-  LIBDE265_CHECK_RESULT NAL_unit* alloc_NAL_unit(int size);
+  [[nodiscard]] std::unique_ptr<NAL_unit> alloc_NAL_unit(int size);
 };
 
 

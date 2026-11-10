@@ -21,6 +21,8 @@
 #include "fallback.h"
 #include "fallback-motion.h"
 #include "fallback-dct.h"
+#include "fallback-intrapred.h"
+#include "fallback-deblk.h"
 
 
 void init_acceleration_functions_fallback(struct acceleration_functions* accel)
@@ -30,16 +32,22 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->put_weighted_pred_8 = put_weighted_pred_8_fallback;
   accel->put_weighted_bipred_8 = put_weighted_bipred_8_fallback;
 
-  accel->put_weighted_pred_avg_16 = put_weighted_pred_avg_16_fallback;
-  accel->put_unweighted_pred_16   = put_unweighted_pred_16_fallback;
-  accel->put_weighted_pred_16 = put_weighted_pred_16_fallback;
-  accel->put_weighted_bipred_16 = put_weighted_bipred_16_fallback;
+  accel->put_weighted_pred_avg_16 = put_weighted_pred_avg_16_fallback<int16_t>;
+  accel->put_unweighted_pred_16   = put_unweighted_pred_16_fallback<int16_t>;
+  accel->put_weighted_pred_16 = put_weighted_pred_16_fallback<int16_t>;
+  accel->put_weighted_bipred_16 = put_weighted_bipred_16_fallback<int16_t>;
+
+  // BitDepth > 12: int32_t intermediates
+  accel->put_weighted_pred_avg_16_32 = put_weighted_pred_avg_16_fallback<int32_t>;
+  accel->put_unweighted_pred_16_32   = put_unweighted_pred_16_fallback<int32_t>;
+  accel->put_weighted_pred_16_32 = put_weighted_pred_16_fallback<int32_t>;
+  accel->put_weighted_bipred_16_32 = put_weighted_bipred_16_fallback<int32_t>;
 
 
   accel->put_hevc_epel_8    = put_epel_8_fallback;
-  accel->put_hevc_epel_h_8  = put_epel_hv_fallback<uint8_t>;
-  accel->put_hevc_epel_v_8  = put_epel_hv_fallback<uint8_t>;
-  accel->put_hevc_epel_hv_8 = put_epel_hv_fallback<uint8_t>;
+  accel->put_hevc_epel_h_8  = put_epel_hv_fallback<uint8_t,int16_t>;
+  accel->put_hevc_epel_v_8  = put_epel_hv_fallback<uint8_t,int16_t>;
+  accel->put_hevc_epel_hv_8 = put_epel_hv_fallback<uint8_t,int16_t>;
 
   accel->put_hevc_qpel_8[0][0] = put_qpel_0_0_fallback;
   accel->put_hevc_qpel_8[0][1] = put_qpel_0_1_fallback;
@@ -58,12 +66,12 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->put_hevc_qpel_8[3][2] = put_qpel_3_2_fallback;
   accel->put_hevc_qpel_8[3][3] = put_qpel_3_3_fallback;
 
-  accel->put_hevc_epel_16    = put_epel_16_fallback;
-  accel->put_hevc_epel_h_16  = put_epel_hv_fallback<uint16_t>;
-  accel->put_hevc_epel_v_16  = put_epel_hv_fallback<uint16_t>;
-  accel->put_hevc_epel_hv_16 = put_epel_hv_fallback<uint16_t>;
+  accel->put_hevc_epel_16    = put_epel_16_fallback<int16_t>;
+  accel->put_hevc_epel_h_16  = put_epel_hv_fallback<uint16_t,int16_t>;
+  accel->put_hevc_epel_v_16  = put_epel_hv_fallback<uint16_t,int16_t>;
+  accel->put_hevc_epel_hv_16 = put_epel_hv_fallback<uint16_t,int16_t>;
 
-  accel->put_hevc_qpel_16[0][0] = put_qpel_0_0_fallback_16;
+  accel->put_hevc_qpel_16[0][0] = put_qpel_0_0_fallback_16<int16_t>;
   accel->put_hevc_qpel_16[0][1] = put_qpel_0_1_fallback_16;
   accel->put_hevc_qpel_16[0][2] = put_qpel_0_2_fallback_16;
   accel->put_hevc_qpel_16[0][3] = put_qpel_0_3_fallback_16;
@@ -79,6 +87,14 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->put_hevc_qpel_16[3][1] = put_qpel_3_1_fallback_16;
   accel->put_hevc_qpel_16[3][2] = put_qpel_3_2_fallback_16;
   accel->put_hevc_qpel_16[3][3] = put_qpel_3_3_fallback_16;
+
+  // BitDepth > 12: int32_t intermediates
+  accel->put_hevc_epel_16_32    = put_epel_16_fallback<int32_t>;
+  accel->put_hevc_epel_h_16_32  = put_epel_hv_fallback<uint16_t,int32_t>;
+  accel->put_hevc_epel_v_16_32  = put_epel_hv_fallback<uint16_t,int32_t>;
+  accel->put_hevc_epel_hv_16_32 = put_epel_hv_fallback<uint16_t,int32_t>;
+
+  accel->put_hevc_qpel_16_32 = put_qpel_fallback_16_32;
 
 
 
@@ -104,6 +120,7 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->rotate_coefficients = rotate_coefficients_fallback;
   accel->add_residual_8  = add_residual_fallback<uint8_t>;
   accel->add_residual_16 = add_residual_fallback<uint16_t>;
+  accel->dequant_coeff_block = dequant_coeff_block_fallback;
   accel->rdpcm_h = rdpcm_h_fallback;
   accel->rdpcm_v = rdpcm_v_fallback;
   accel->transform_skip_residual = transform_skip_residual_fallback;
@@ -124,4 +141,14 @@ void init_acceleration_functions_fallback(struct acceleration_functions* accel)
   accel->hadamard_transform_8[1] = hadamard_8x8_8_fallback;
   accel->hadamard_transform_8[2] = hadamard_16x16_8_fallback;
   accel->hadamard_transform_8[3] = hadamard_32x32_8_fallback;
+
+  accel->intra_pred_dc_8  = intra_pred_dc_fallback<uint8_t>;
+  accel->intra_pred_dc_16 = intra_pred_dc_fallback<uint16_t>;
+  accel->intra_pred_planar_8  = intra_pred_planar_fallback<uint8_t>;
+  accel->intra_pred_planar_16 = intra_pred_planar_fallback<uint16_t>;
+  accel->intra_pred_angular_8  = intra_pred_angular_fallback<uint8_t>;
+  accel->intra_pred_angular_16 = intra_pred_angular_fallback<uint16_t>;
+
+  accel->deblock_luma_8   = deblock_luma_8_fallback;
+  accel->deblock_chroma_8 = deblock_chroma_8_fallback;
 }

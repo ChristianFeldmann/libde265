@@ -27,80 +27,25 @@
 #include "config.h"
 #endif
 
-#ifdef HAVE_STDBOOL_H
-#include <stdbool.h>
-#endif
-
 #include <deque>
 #include <string>
+#include <atomic>
 
-#ifndef _WIN32
-#include <pthread.h>
-
-typedef pthread_t        de265_thread;
-typedef pthread_mutex_t  de265_mutex;
-typedef pthread_cond_t   de265_cond;
-
-#else // _WIN32
+#ifdef _WIN32
+#if !defined(NOMINMAX)
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include "../extra/win32cond.h"
 #if _MSC_VER > 1310
 #include <intrin.h>
-#else
-extern "C"
-{
-   LONG  __cdecl _InterlockedExchangeAdd(long volatile *Addend, LONG Value);
-}
-#pragma intrinsic (_InterlockedExchangeAdd)
-#define InterlockedExchangeAdd _InterlockedExchangeAdd
 #endif
-
-typedef HANDLE              de265_thread;
-typedef HANDLE              de265_mutex;
-typedef win32_cond_t        de265_cond;
 #endif  // _WIN32
 
-#ifndef _WIN32
-int  de265_thread_create(de265_thread* t, void *(*start_routine) (void *), void *arg);
-#else
-int  de265_thread_create(de265_thread* t, LPTHREAD_START_ROUTINE start_routine, void *arg);
-#endif
-void de265_thread_join(de265_thread t);
-void de265_thread_destroy(de265_thread* t);
-void de265_mutex_init(de265_mutex* m);
-void de265_mutex_destroy(de265_mutex* m);
-void de265_mutex_lock(de265_mutex* m);
-void de265_mutex_unlock(de265_mutex* m);
-void de265_cond_init(de265_cond* c);
-void de265_cond_destroy(de265_cond* c);
-void de265_cond_broadcast(de265_cond* c, de265_mutex* m);
-void de265_cond_wait(de265_cond* c,de265_mutex* m);
-void de265_cond_signal(de265_cond* c);
-
-typedef volatile long de265_sync_int;
-
-inline int de265_sync_sub_and_fetch(de265_sync_int* cnt, int n)
-{
-#ifdef _WIN64
-  return _InterlockedAdd(cnt, -n);
-#elif _WIN32
-  return _InterlockedExchangeAdd(cnt, -n) - n;
-#else
-  return __sync_sub_and_fetch(cnt, n);
-#endif
-}
-
-inline int de265_sync_add_and_fetch(de265_sync_int* cnt, int n)
-{
-#ifdef _WIN64
-  return _InterlockedAdd(cnt, n);
-#elif _WIN32
-  return _InterlockedExchangeAdd(cnt, n) + n;
-#else
-  return __sync_add_and_fetch(cnt, n);
-#endif
-}
-
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
 
 class de265_progress_lock
 {
@@ -112,15 +57,21 @@ public:
   void set_progress(int progress);
   void increase_progress(int progress);
   int  get_progress() const;
-  void reset(int value=0) { mProgress=value; }
+  void reset(int value=0) { mProgress.store(value, std::memory_order_release); }
 
 private:
-  int mProgress;
+  // Read lock-free on the fast paths of wait_for_progress()/get_progress()
+  // while written under 'mutex'. It must be atomic so those reads are not a
+  // data race, and it carries acquire/release ordering so that the state a
+  // producer wrote before signalling progress (e.g. the saved WPP row context)
+  // is published to a consumer that observes the progress value without taking
+  // the mutex (GHSA-xp3h-6f5r-8cxp).
+  std::atomic<int> mProgress;
 
   // private data
 
-  de265_mutex mutex;
-  de265_cond  cond;
+  std::mutex mutex;
+  std::condition_variable cond;
 };
 
 
@@ -139,7 +90,7 @@ public:
 };
 
 
-#define MAX_THREADS 32
+constexpr int MAX_THREADS = 32;
 
 /* TODO NOTE: When unblocking a task, we have to check first
    if there are threads waiting because of the run-count limit.
@@ -150,26 +101,26 @@ public:
 class thread_pool
 {
  public:
+  de265_error start(int num_threads);
+  void        stop(); // do not process remaining tasks
+  void        add_task(thread_task* task);
+
+
   bool stopped;
 
   std::deque<thread_task*> tasks;  // we are not the owner
 
-  de265_thread thread[MAX_THREADS];
-  int num_threads;
-
   int num_threads_working;
 
-  int ctbx[MAX_THREADS]; // the CTB the thread is working on
-  int ctby[MAX_THREADS];
+  std::mutex  mutex;
+  std::condition_variable  cond_var;
 
-  de265_mutex  mutex;
-  de265_cond   cond_var;
+private:
+  std::thread thread[MAX_THREADS];
+  int num_threads;
+
+  //int ctbx[MAX_THREADS]; // the CTB the thread is working on
+  //int ctby[MAX_THREADS];
 };
-
-
-de265_error start_thread_pool(thread_pool* pool, int num_threads);
-void        stop_thread_pool(thread_pool* pool); // do not process remaining tasks
-
-void        add_task(thread_pool* pool, thread_task* task); // TOCO: can make thread_task const
 
 #endif

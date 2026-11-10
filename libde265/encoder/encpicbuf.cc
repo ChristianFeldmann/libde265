@@ -134,7 +134,7 @@ void image_data::set_references(int sps_index, // -1 -> custom
   //shdr.num_ref_idx_l1_active = l1.size();
 
   assert(l0.size() < MAX_NUM_REF_PICS);
-  for (int i=0;i<l0.size();i++) {
+  for (size_t i=0;i<l0.size();i++) {
     shdr.RefPicList[0][i] = l0[i];
   }
 
@@ -200,30 +200,22 @@ void encoder_picture_buffer::mark_encoding_finished(int frame_number)
 
   // first, mark all images unused
 
-#ifdef FOR_LOOP_AUTO_SUPPORT
-  FOR_LOOP(auto, imgdata, mImages) {
-#else
-  FOR_LOOP(image_data *, imgdata, mImages) {
-#endif
+  for (auto imgdata : mImages) {
     imgdata->mark_used = false;
   }
 
   // mark all images that will be used later
 
-  FOR_LOOP(int, f, data->ref0)     { get_picture(f)->mark_used=true; }
-  FOR_LOOP(int, f, data->ref1)     { get_picture(f)->mark_used=true; }
-  FOR_LOOP(int, f, data->longterm) { get_picture(f)->mark_used=true; }
-  FOR_LOOP(int, f, data->keep)     { get_picture(f)->mark_used=true; }
+  for (int f : data->ref0)     { get_picture(f)->mark_used=true; }
+  for (int f : data->ref1)     { get_picture(f)->mark_used=true; }
+  for (int f : data->longterm) { get_picture(f)->mark_used=true; }
+  for (int f : data->keep)     { get_picture(f)->mark_used=true; }
   data->mark_used=true;
 
   // copy over all images that we still keep
 
   std::deque<image_data*> newImageSet;
-#ifdef FOR_LOOP_AUTO_SUPPORT
-  FOR_LOOP(auto, imgdata, mImages) {
-#else
-  FOR_LOOP(image_data *, imgdata, mImages) {
-#endif
+  for (auto imgdata : mImages) {
     if (imgdata->mark_used || imgdata->is_in_output_queue) {
       imgdata->reconstruction->PicState = UsedForShortTermReference; // TODO: this is only a hack
 
@@ -245,7 +237,7 @@ void encoder_picture_buffer::mark_encoding_finished(int frame_number)
 
 bool encoder_picture_buffer::have_more_frames_to_encode() const
 {
-  for (int i=0;i<mImages.size();i++) {
+  for (size_t i=0;i<mImages.size();i++) {
     if (mImages[i]->state < image_data::state_encoding) {
       return true;
     }
@@ -257,7 +249,7 @@ bool encoder_picture_buffer::have_more_frames_to_encode() const
 
 image_data* encoder_picture_buffer::get_next_picture_to_encode()
 {
-  for (int i=0;i<mImages.size();i++) {
+  for (size_t i=0;i<mImages.size();i++) {
     if (mImages[i]->state < image_data::state_encoding) {
       return mImages[i];
     }
@@ -269,7 +261,7 @@ image_data* encoder_picture_buffer::get_next_picture_to_encode()
 
 const image_data* encoder_picture_buffer::get_picture(int frame_number) const
 {
-  for (int i=0;i<mImages.size();i++) {
+  for (size_t i=0;i<mImages.size();i++) {
     if (mImages[i]->frame_number == frame_number)
       return mImages[i];
   }
@@ -281,7 +273,7 @@ const image_data* encoder_picture_buffer::get_picture(int frame_number) const
 
 image_data* encoder_picture_buffer::get_picture(int frame_number)
 {
-  for (int i=0;i<mImages.size();i++) {
+  for (size_t i=0;i<mImages.size();i++) {
     if (mImages[i]->frame_number == frame_number)
       return mImages[i];
   }
@@ -293,7 +285,7 @@ image_data* encoder_picture_buffer::get_picture(int frame_number)
 
 bool encoder_picture_buffer::has_picture(int frame_number) const
 {
-  for (int i=0;i<mImages.size();i++) {
+  for (size_t i=0;i<mImages.size();i++) {
     if (mImages[i]->frame_number == frame_number)
       return true;
   }

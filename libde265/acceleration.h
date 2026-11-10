@@ -26,6 +26,12 @@
 #include <assert.h>
 
 
+// Highest bit depth at which the intermediate motion-compensation samples
+// (predSamplesLX, spec 8.5.3.3.3) still fit into int16_t. Above it, the
+// "_16_32" kernels with int32_t intermediates are used.
+constexpr int MC_MAX_BIT_DEPTH_INT16 = 12;
+
+
 struct acceleration_functions
 {
   void (*put_weighted_pred_avg_8)(uint8_t *_dst, ptrdiff_t dststride,
@@ -64,20 +70,61 @@ struct acceleration_functions
                                 int w1,int o1, int w2,int o2, int log2WD, int bit_depth);
 
 
+  // --- BitDepth > MC_MAX_BIT_DEPTH_INT16 ---
+  // The intermediate prediction samples (predSamplesLX, spec 8.5.3.3.3) have
+  // max(14, BitDepth+2) bits plus the overshoot of the interpolation filters,
+  // so above 12 bits they do not fit into int16_t anymore. These variants of the
+  // 16-bit pixel kernels take int32_t intermediates instead.
+
+  void (*put_weighted_pred_avg_16_32)(uint16_t *_dst, ptrdiff_t dststride,
+                                      const int32_t *src1, const int32_t *src2, ptrdiff_t srcstride,
+                                      int width, int height, int bit_depth);
+
+  void (*put_unweighted_pred_16_32)(uint16_t *_dst, ptrdiff_t dststride,
+                                    const int32_t *src, ptrdiff_t srcstride,
+                                    int width, int height, int bit_depth);
+
+  void (*put_weighted_pred_16_32)(uint16_t *_dst, ptrdiff_t dststride,
+                                  const int32_t *src, ptrdiff_t srcstride,
+                                  int width, int height,
+                                  int w,int o,int log2WD, int bit_depth);
+  void (*put_weighted_bipred_16_32)(uint16_t *_dst, ptrdiff_t dststride,
+                                    const int32_t *src1, const int32_t *src2, ptrdiff_t srcstride,
+                                    int width, int height,
+                                    int w1,int o1, int w2,int o2, int log2WD, int bit_depth);
+
+
+  // Dispatch on bit depth; the int32_t overloads are for BitDepth > MC_MAX_BIT_DEPTH_INT16 only.
+
   void put_weighted_pred_avg(void *_dst, ptrdiff_t dststride,
                              const int16_t *src1, const int16_t *src2, ptrdiff_t srcstride,
+                             int width, int height, int bit_depth) const;
+  void put_weighted_pred_avg(void *_dst, ptrdiff_t dststride,
+                             const int32_t *src1, const int32_t *src2, ptrdiff_t srcstride,
                              int width, int height, int bit_depth) const;
 
   void put_unweighted_pred(void *_dst, ptrdiff_t dststride,
                            const int16_t *src, ptrdiff_t srcstride,
+                           int width, int height, int bit_depth) const;
+  void put_unweighted_pred(void *_dst, ptrdiff_t dststride,
+                           const int32_t *src, ptrdiff_t srcstride,
                            int width, int height, int bit_depth) const;
 
   void put_weighted_pred(void *_dst, ptrdiff_t dststride,
                          const int16_t *src, ptrdiff_t srcstride,
                          int width, int height,
                          int w,int o,int log2WD, int bit_depth) const;
+  void put_weighted_pred(void *_dst, ptrdiff_t dststride,
+                         const int32_t *src, ptrdiff_t srcstride,
+                         int width, int height,
+                         int w,int o,int log2WD, int bit_depth) const;
+
   void put_weighted_bipred(void *_dst, ptrdiff_t dststride,
                            const int16_t *src1, const int16_t *src2, ptrdiff_t srcstride,
+                           int width, int height,
+                           int w1,int o1, int w2,int o2, int log2WD, int bit_depth) const;
+  void put_weighted_bipred(void *_dst, ptrdiff_t dststride,
+                           const int32_t *src1, const int32_t *src2, ptrdiff_t srcstride,
                            int width, int height,
                            int w1,int o1, int w2,int o2, int log2WD, int bit_depth) const;
 
@@ -120,6 +167,31 @@ struct acceleration_functions
                                  int16_t* mcbuffer, int bit_depth);
 
 
+  // --- BitDepth > MC_MAX_BIT_DEPTH_INT16: 16-bit pixels, int32_t intermediates (see above) ---
+
+  void (*put_hevc_epel_16_32)(int32_t *dst, ptrdiff_t dststride,
+                              const uint16_t *src, ptrdiff_t srcstride, int width, int height,
+                              int mx, int my, int32_t* mcbuffer, int bit_depth);
+  void (*put_hevc_epel_h_16_32)(int32_t *dst, ptrdiff_t dststride,
+                                const uint16_t *src, ptrdiff_t srcstride, int width, int height,
+                                int mx, int my, int32_t* mcbuffer, int bit_depth);
+  void (*put_hevc_epel_v_16_32)(int32_t *dst, ptrdiff_t dststride,
+                                const uint16_t *src, ptrdiff_t srcstride, int width, int height,
+                                int mx, int my, int32_t* mcbuffer, int bit_depth);
+  void (*put_hevc_epel_hv_16_32)(int32_t *dst, ptrdiff_t dststride,
+                                 const uint16_t *src, ptrdiff_t srcstride, int width, int height,
+                                 int mx, int my, int32_t* mcbuffer, int bit_depth);
+
+  // One generic kernel for all fractional positions (including full-sample),
+  // since this path is not performance critical and per-position copies of
+  // the filter would cost ~50 KB of code.
+  void (*put_hevc_qpel_16_32)(int32_t *dst, ptrdiff_t dststride,
+                              const uint16_t *src, ptrdiff_t srcstride, int width, int height,
+                              int32_t* mcbuffer, int xFrac, int yFrac, int bit_depth);
+
+
+  // Dispatch on bit depth; the int32_t overloads are for BitDepth > MC_MAX_BIT_DEPTH_INT16 only.
+
   void put_hevc_epel(int16_t *dst, ptrdiff_t dststride,
                      const void *src, ptrdiff_t srcstride, int width, int height,
                      int mx, int my, int16_t* mcbuffer, int bit_depth) const;
@@ -136,6 +208,23 @@ struct acceleration_functions
   void put_hevc_qpel(int16_t *dst, ptrdiff_t dststride,
                      const void *src, ptrdiff_t srcstride, int width, int height,
                      int16_t* mcbuffer, int dX,int dY, int bit_depth) const;
+
+  void put_hevc_epel(int32_t *dst, ptrdiff_t dststride,
+                     const void *src, ptrdiff_t srcstride, int width, int height,
+                     int mx, int my, int32_t* mcbuffer, int bit_depth) const;
+  void put_hevc_epel_h(int32_t *dst, ptrdiff_t dststride,
+                       const void *src, ptrdiff_t srcstride, int width, int height,
+                       int mx, int my, int32_t* mcbuffer, int bit_depth) const;
+  void put_hevc_epel_v(int32_t *dst, ptrdiff_t dststride,
+                       const void *src, ptrdiff_t srcstride, int width, int height,
+                       int mx, int my, int32_t* mcbuffer, int bit_depth) const;
+  void put_hevc_epel_hv(int32_t *dst, ptrdiff_t dststride,
+                        const void *src, ptrdiff_t srcstride, int width, int height,
+                        int mx, int my, int32_t* mcbuffer, int bit_depth) const;
+
+  void put_hevc_qpel(int32_t *dst, ptrdiff_t dststride,
+                     const void *src, ptrdiff_t srcstride, int width, int height,
+                     int32_t* mcbuffer, int dX,int dY, int bit_depth) const;
 
 
   // --- inverse transforms ---
@@ -172,6 +261,20 @@ struct acceleration_functions
   template <class pixel_t>
   void add_residual(pixel_t *dst, ptrdiff_t stride, const int32_t* r, int nT, int bit_depth) const;
 
+  // Inverse quantization (no scaling list): for each of the nCoeff entries,
+  // coeffBuf[coeffPos[i]] = Clip16( (coeffList[i]*fact + offset) >> bdShift ).
+  // Contract: fact small enough that coeffList[i]*fact+offset fits in int32
+  // (caller checks this; the rare int64 case stays scalar). bdShift >= 1.
+  void (*dequant_coeff_block)(int16_t* coeffBuf, const int16_t* coeffList,
+                              const int16_t* coeffPos, int nCoeff,
+                              int32_t fact, int32_t offset, int32_t bdShift);
+
+  // --- deblocking (8 bit; one 4-line edge segment) ---
+  void (*deblock_luma_8)(uint8_t* ptr, ptrdiff_t stride, int vertical,
+                         int dE, int dEp, int dEq, int tc, int filterP, int filterQ);
+  void (*deblock_chroma_8)(uint8_t* ptr, ptrdiff_t stride, int vertical,
+                           int tc, int filterP, int filterQ);
+
   void (*rdpcm_v)(int32_t* residual, const int16_t* coeffs, int nT,int tsShift,int bdShift);
   void (*rdpcm_h)(int32_t* residual, const int16_t* coeffs, int nT,int tsShift,int bdShift);
 
@@ -185,6 +288,22 @@ struct acceleration_functions
   template <class pixel_t> void transform_4x4_dst_add(pixel_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth) const;
   template <class pixel_t> void transform_add(int sizeIdx, pixel_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth) const;
 
+
+  // --- intra prediction ---
+
+  void (*intra_pred_dc_8 )(uint8_t*  dst, ptrdiff_t stride, int nT, int cIdx, const uint8_t*  border);
+  void (*intra_pred_dc_16)(uint16_t* dst, ptrdiff_t stride, int nT, int cIdx, const uint16_t* border);
+  void (*intra_pred_planar_8 )(uint8_t*  dst, ptrdiff_t stride, int nT, int cIdx, const uint8_t*  border);
+  void (*intra_pred_planar_16)(uint16_t* dst, ptrdiff_t stride, int nT, int cIdx, const uint16_t* border);
+  void (*intra_pred_angular_8 )(uint8_t*  dst, ptrdiff_t stride, int bit_depth, int disableBoundaryFilter,
+                                int xB0, int yB0, int mode, int nT, int cIdx, const uint8_t*  border);
+  void (*intra_pred_angular_16)(uint16_t* dst, ptrdiff_t stride, int bit_depth, int disableBoundaryFilter,
+                                int xB0, int yB0, int mode, int nT, int cIdx, const uint16_t* border);
+
+  template <class pixel_t> void intra_pred_dc(pixel_t* dst, ptrdiff_t stride, int nT, int cIdx, const pixel_t* border) const;
+  template <class pixel_t> void intra_pred_planar(pixel_t* dst, ptrdiff_t stride, int nT, int cIdx, const pixel_t* border) const;
+  template <class pixel_t> void intra_pred_angular(pixel_t* dst, ptrdiff_t stride, int bit_depth, int disableBoundaryFilter,
+                                                   int xB0, int yB0, int mode, int nT, int cIdx, const pixel_t* border) const;
 
 
   // --- forward transforms ---
@@ -338,6 +457,88 @@ inline void acceleration_functions::put_hevc_qpel(int16_t *dst, ptrdiff_t dststr
     put_hevc_qpel_16[dX][dY](dst,dststride,(const uint16_t*)src,srcstride,width,height,mcbuffer, bit_depth);
 }
 
+
+// --- BitDepth > MC_MAX_BIT_DEPTH_INT16: int32_t intermediates, always 16-bit pixels ---
+
+inline void acceleration_functions::put_weighted_pred_avg(void* _dst, ptrdiff_t dststride,
+                                                          const int32_t *src1, const int32_t *src2, ptrdiff_t srcstride,
+                                                          int width, int height, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_weighted_pred_avg_16_32((uint16_t*)_dst,dststride,src1,src2,srcstride,width,height,bit_depth);
+}
+
+
+inline void acceleration_functions::put_unweighted_pred(void* _dst, ptrdiff_t dststride,
+                                                        const int32_t *src, ptrdiff_t srcstride,
+                                                        int width, int height, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_unweighted_pred_16_32((uint16_t*)_dst,dststride,src,srcstride,width,height,bit_depth);
+}
+
+
+inline void acceleration_functions::put_weighted_pred(void* _dst, ptrdiff_t dststride,
+                                                      const int32_t *src, ptrdiff_t srcstride,
+                                                      int width, int height,
+                                                      int w,int o,int log2WD, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_weighted_pred_16_32((uint16_t*)_dst,dststride,src,srcstride,width,height,w,o,log2WD,bit_depth);
+}
+
+
+inline void acceleration_functions::put_weighted_bipred(void* _dst, ptrdiff_t dststride,
+                                                        const int32_t *src1, const int32_t *src2, ptrdiff_t srcstride,
+                                                        int width, int height,
+                                                        int w1,int o1, int w2,int o2, int log2WD, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_weighted_bipred_16_32((uint16_t*)_dst,dststride,src1,src2,srcstride, width,height, w1,o1,w2,o2,log2WD,bit_depth);
+}
+
+
+inline void acceleration_functions::put_hevc_epel(int32_t *dst, ptrdiff_t dststride,
+                                                  const void *src, ptrdiff_t srcstride, int width, int height,
+                                                  int mx, int my, int32_t* mcbuffer, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_hevc_epel_16_32(dst,dststride,(const uint16_t*)src,srcstride,width,height,mx,my,mcbuffer, bit_depth);
+}
+
+inline void acceleration_functions::put_hevc_epel_h(int32_t *dst, ptrdiff_t dststride,
+                                                    const void *src, ptrdiff_t srcstride, int width, int height,
+                                                    int mx, int my, int32_t* mcbuffer, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_hevc_epel_h_16_32(dst,dststride,(const uint16_t*)src,srcstride,width,height,mx,my,mcbuffer,bit_depth);
+}
+
+inline void acceleration_functions::put_hevc_epel_v(int32_t *dst, ptrdiff_t dststride,
+                                                    const void *src, ptrdiff_t srcstride, int width, int height,
+                                                    int mx, int my, int32_t* mcbuffer, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_hevc_epel_v_16_32(dst,dststride,(const uint16_t*)src,srcstride,width,height,mx,my,mcbuffer, bit_depth);
+}
+
+inline void acceleration_functions::put_hevc_epel_hv(int32_t *dst, ptrdiff_t dststride,
+                                                     const void *src, ptrdiff_t srcstride, int width, int height,
+                                                     int mx, int my, int32_t* mcbuffer, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_hevc_epel_hv_16_32(dst,dststride,(const uint16_t*)src,srcstride,width,height,mx,my,mcbuffer, bit_depth);
+}
+
+inline void acceleration_functions::put_hevc_qpel(int32_t *dst, ptrdiff_t dststride,
+                                                  const void *src, ptrdiff_t srcstride, int width, int height,
+                                                  int32_t* mcbuffer, int dX,int dY, int bit_depth) const
+{
+  assert(bit_depth > 8);
+  put_hevc_qpel_16_32(dst,dststride,(const uint16_t*)src,srcstride,width,height,mcbuffer, dX,dY, bit_depth);
+}
+
+
 template <> inline void acceleration_functions::transform_skip<uint8_t>(uint8_t *dst, const int16_t *coeffs,ptrdiff_t stride, int bit_depth) const { transform_skip_8(dst,coeffs,stride); }
 template <> inline void acceleration_functions::transform_skip<uint16_t>(uint16_t *dst, const int16_t *coeffs, ptrdiff_t stride, int bit_depth) const { transform_skip_16(dst,coeffs,stride, bit_depth); }
 
@@ -355,5 +556,14 @@ template <> inline void acceleration_functions::transform_add<uint16_t>(int size
 
 template <> inline void acceleration_functions::add_residual(uint8_t *dst,  ptrdiff_t stride, const int32_t* r, int nT, int bit_depth) const { add_residual_8(dst,stride,r,nT,bit_depth); }
 template <> inline void acceleration_functions::add_residual(uint16_t *dst, ptrdiff_t stride, const int32_t* r, int nT, int bit_depth) const { add_residual_16(dst,stride,r,nT,bit_depth); }
+
+template <> inline void acceleration_functions::intra_pred_dc<uint8_t> (uint8_t*  dst, ptrdiff_t stride, int nT, int cIdx, const uint8_t*  border) const { intra_pred_dc_8 (dst,stride,nT,cIdx,border); }
+template <> inline void acceleration_functions::intra_pred_dc<uint16_t>(uint16_t* dst, ptrdiff_t stride, int nT, int cIdx, const uint16_t* border) const { intra_pred_dc_16(dst,stride,nT,cIdx,border); }
+
+template <> inline void acceleration_functions::intra_pred_planar<uint8_t> (uint8_t*  dst, ptrdiff_t stride, int nT, int cIdx, const uint8_t*  border) const { intra_pred_planar_8 (dst,stride,nT,cIdx,border); }
+template <> inline void acceleration_functions::intra_pred_planar<uint16_t>(uint16_t* dst, ptrdiff_t stride, int nT, int cIdx, const uint16_t* border) const { intra_pred_planar_16(dst,stride,nT,cIdx,border); }
+
+template <> inline void acceleration_functions::intra_pred_angular<uint8_t> (uint8_t*  dst, ptrdiff_t stride, int bit_depth, int disableBoundaryFilter, int xB0, int yB0, int mode, int nT, int cIdx, const uint8_t*  border) const { intra_pred_angular_8 (dst,stride,bit_depth,disableBoundaryFilter,xB0,yB0,mode,nT,cIdx,border); }
+template <> inline void acceleration_functions::intra_pred_angular<uint16_t>(uint16_t* dst, ptrdiff_t stride, int bit_depth, int disableBoundaryFilter, int xB0, int yB0, int mode, int nT, int cIdx, const uint16_t* border) const { intra_pred_angular_16(dst,stride,bit_depth,disableBoundaryFilter,xB0,yB0,mode,nT,cIdx,border); }
 
 #endif

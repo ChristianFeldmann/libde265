@@ -1,41 +1,28 @@
-set (dec265_sources
-  dec265.cc
-)
+add_executable (dec265 dec265.cc)
 
-set (hdrcopy_sources
-  hdrcopy.cc
-)
+target_link_libraries (dec265 PRIVATE de265)
+
+if(SDL2_FOUND)
+  target_sources(dec265 PRIVATE sdl-display.cc)
+  target_compile_definitions(dec265 PRIVATE HAVE_SDL)
+  target_include_directories (dec265 PRIVATE "${SDL2_INCLUDE_DIRS}")
+  target_link_libraries (dec265 PRIVATE ${SDL2_LIBRARIES})
+endif()
 
 if(MSVC)
-  set (dec265_sources
-    ${dec265_sources}
-    ../extra/getopt.c
-    ../extra/getopt_long.c
-  )
-  set (hdrcopy_sources
-    ${hdrcopy_sources}
+  target_sources(dec265 PRIVATE
     ../extra/getopt.c
     ../extra/getopt_long.c
   )
 endif()
 
-if(SDL_FOUND)
-  add_definitions(-DHAVE_SDL)
-  include_directories ("${SDL_INCLUDE_DIR}")
-  set (dec265_sources
-    ${dec265_sources}
-    sdl.cc
-  )
-endif()
+install (TARGETS dec265 DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-add_executable (dec265 ${dec265_sources})
-
-target_link_libraries (dec265 ${LIBDE265_LIBRARY_NAME} ${SDL_LIBRARY})
-
-
-if(NOT MSVC)
-  # hdrcopy uses internal APIs that are not available when compiled for Windows
-  add_executable (hdrcopy ${hdrcopy_sources})
-
-  target_link_libraries (hdrcopy ${LIBDE265_LIBRARY_NAME})
-endif()
+#if(NOT MSVC)
+#  # hdrcopy uses internal APIs that are not available when compiled for Windows
+#  add_executable (hdrcopy hdrcopy.cc)
+#
+#  target_link_libraries (hdrcopy PRIVATE de265)
+#
+#  install (TARGETS hdrcopy DESTINATION ${CMAKE_INSTALL_BINDIR})
+#endif()

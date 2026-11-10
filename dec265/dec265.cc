@@ -1,37 +1,47 @@
 /*
- * libde265 example application "dec265".
- * Copyright (c) 2013-2014 struktur AG, Dirk Farin <farin@struktur.de>
- *
- * This file is part of dec265, an example application using libde265.
- *
- * dec265 is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * dec265 is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with dec265.  If not, see <http://www.gnu.org/licenses/>.
- */
+  libde265 example application "dec265".
+
+  MIT License
+
+  Copyright (c) 2013-2014 struktur AG, Dirk Farin <farin@struktur.de>
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+*/
 
 #define DO_MEMORY_LOGGING 0
 
 #include "de265.h"
+#include <stdexcept>
+#include <iostream>
+#include <optional>
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
-#include <stdio.h>
-#include <stdlib.h>
-#include <limits>
+#include <cstdio>
+#include <cstdlib>
+#include <cinttypes>
 #include <getopt.h>
+#include <cstring>
 #ifdef HAVE_MALLOC_H
 #include <malloc.h>
 #endif
-#include <signal.h>
 
 #ifndef _MSC_VER
 #include <sys/time.h>
@@ -46,12 +56,17 @@ using namespace videogfx;
 #endif
 
 #if HAVE_SDL
-#include "sdl.hh"
+#include "sdl-display.h"
 #endif
 
+#ifndef PRIu32
+#define PRIu32 "u"
+#endif
 
 #define BUFFER_SIZE 40960
 #define NUM_THREADS 4
+
+const uint32_t kSecurityLimit_MaxNALSize = 100 * 1024 * 1024; // 100 MB
 
 int nThreads=0;
 bool nal_input=false;
@@ -106,9 +121,13 @@ static struct option long_options[] = {
 static void write_picture(const de265_image* img)
 {
   static FILE* fh = NULL;
-  if (fh==NULL) { fh = fopen(output_filename, "wb"); }
-
-
+  if (fh==NULL) {
+    if (strcmp(output_filename, "-") == 0) {
+      fh = stdout;
+    } else {
+      fh = fopen(output_filename, "wb");
+    }
+  }
 
   for (int c=0;c<3;c++) {
     int stride;
@@ -221,6 +240,9 @@ void display_image(const struct de265_image* img)
 }
 #endif
 
+
+#if HAVE_SDL
+
 static uint8_t* convert_to_8bit(const uint8_t* data, int width, int height,
                                 int pixelsPerLine, int bit_depth)
 {
@@ -236,8 +258,6 @@ static uint8_t* convert_to_8bit(const uint8_t* data, int width, int height,
   return out;
 }
 
-
-#if HAVE_SDL
 SDL_YUV_Display sdlWin;
 bool sdl_active=false;
 
@@ -251,17 +271,20 @@ bool display_sdl(const struct de265_image* img)
 
   de265_chroma chroma = de265_get_chroma_format(img);
 
+  enum SDL_YUV_Display::SDL_Chroma sdlChroma;
+  switch (chroma) {
+  case de265_chroma_420:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_420;  break;
+  case de265_chroma_422:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_422;  break;
+  case de265_chroma_444:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_444;  break;
+  case de265_chroma_mono: sdlChroma = SDL_YUV_Display::SDL_CHROMA_MONO; break;
+  default: assert(false); sdlChroma = SDL_YUV_Display::SDL_CHROMA_MONO;
+  }
+
   if (!sdl_active) {
     sdl_active=true;
-    enum SDL_YUV_Display::SDL_Chroma sdlChroma;
-    switch (chroma) {
-    case de265_chroma_420:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_420;  break;
-    case de265_chroma_422:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_422;  break;
-    case de265_chroma_444:  sdlChroma = SDL_YUV_Display::SDL_CHROMA_444;  break;
-    case de265_chroma_mono: sdlChroma = SDL_YUV_Display::SDL_CHROMA_MONO; break;
-    }
-
-    sdlWin.init(width,height, sdlChroma);
+    if (!sdlWin.init(width,height, sdlChroma)) return true;
+  } else {
+    if (!sdlWin.resize(width,height, sdlChroma)) return true;
   }
 
   int stride,chroma_stride;
@@ -548,6 +571,40 @@ void (*volatile __malloc_initialize_hook)(void) = init_my_hooks;
 #endif
 
 
+int parse_param(const char* arg, std::optional<int> lower_bound, std::optional<int> upper_bound, const char* arg_name)
+{
+  int value;
+
+  try {
+    size_t len;
+    value = std::stoi(optarg, &len);
+    if (arg[len] != 0) {
+      std::cerr << "invalid argument to " << arg_name << "\n";
+      exit(5);
+    }
+  } catch (std::invalid_argument const& ex) {
+    std::cerr << "invalid argument to " << arg_name << "\n";
+    exit(5);
+  }
+  catch (std::out_of_range const& ex) {
+    std::cerr << "argument to -T is out of range\n";
+    exit(5);
+  }
+
+  if (lower_bound && value < *lower_bound) {
+    std::cerr << "argument to " << arg_name << " may not be smaller than " << *lower_bound << "\n";
+    exit(5);
+  }
+
+  if (upper_bound && value > *upper_bound) {
+    std::cerr << "argument to " << arg_name << " may not be larger than " << *upper_bound << "\n";
+    exit(5);
+  }
+
+  return value;
+}
+
+
 int main(int argc, char** argv)
 {
   while (1) {
@@ -563,9 +620,9 @@ int main(int argc, char** argv)
 
     switch (c) {
     case 'q': quiet++; break;
-    case 't': nThreads=atoi(optarg); break;
+    case 't': nThreads=parse_param(optarg, 0, std::nullopt, "-t"); break;
     case 'c': check_hash=true; break;
-    case 'f': max_frames=atoi(optarg); break;
+    case 'f': max_frames=parse_param(optarg, 1, std::nullopt, "-f"); break;
     case 'o': write_yuv=true; output_filename=optarg; break;
     case 'h': show_help=true; break;
     case 'd': dump_headers=true; break;
@@ -577,14 +634,14 @@ int main(int argc, char** argv)
     case 'm': measure_quality=true; reference_filename=optarg; break;
     case 's': show_ssim_map=true; break;
     case 'e': show_psnr_map=true; break;
-    case 'T': highestTID=atoi(optarg); break;
+    case 'T': highestTID = parse_param(optarg, 0, std::nullopt, "-T"); break;
     case 'v': verbosity++; break;
     }
   }
 
   if (optind != argc-1 || show_help) {
     fprintf(stderr," dec265  v%s\n", de265_get_version());
-    fprintf(stderr,"--------------\n");
+    fprintf(stderr,"-----------------\n");
     fprintf(stderr,"usage: dec265 [options] videofile.bin\n");
     fprintf(stderr,"The video file must be a raw bitstream, or a stream with NAL units (option -n).\n");
     fprintf(stderr,"\n");
@@ -656,12 +713,23 @@ int main(int argc, char** argv)
 
   if (measure_quality) {
     reference_file = fopen(reference_filename, "rb");
+    if (reference_file == nullptr) {
+      fprintf(stderr, "Error: cannot create measurement output file '%s'\n", reference_filename);
+      exit(5);
+    }
   }
 
 
-  FILE* fh = fopen(argv[optind], "rb");
+  FILE* fh;
+  if (strcmp(argv[optind],"-")==0) {
+    fh = stdin;
+  }
+  else {
+    fh = fopen(argv[optind], "rb");
+  }
+
   if (fh==NULL) {
-    fprintf(stderr,"cannot open file %s!\n", argv[1]);
+    fprintf(stderr,"cannot open file %s!\n", argv[optind]);
     exit(10);
   }
 
@@ -686,20 +754,31 @@ int main(int argc, char** argv)
       if (nal_input) {
         uint8_t len[4];
         int n = fread(len,1,4,fh);
-        int length = (len[0]<<24) + (len[1]<<16) + (len[2]<<8) + len[3];
+        uint32_t length = (len[0]<<24) + (len[1]<<16) + (len[2]<<8) + len[3];
 
-        uint8_t* buf = (uint8_t*)malloc(length);
-        n = fread(buf,1,length,fh);
-        err = de265_push_NAL(ctx, buf,n,  pos, (void*)1);
+	if (length > kSecurityLimit_MaxNALSize) {
+	  fprintf(stderr, "NAL packet with size %" PRIu32 " exceeds security limit %" PRIu32 ", skipping this NAL.\n",
+		  length,
+		  kSecurityLimit_MaxNALSize);
 
-        if (write_bytestream) {
-          uint8_t sc[3] = { 0,0,1 };
-          fwrite(sc ,1,3,bytestream_fh);
-          fwrite(buf,1,n,bytestream_fh);
-        }
+	  fseek(fh, length, SEEK_CUR);
 
-        free(buf);
-        pos+=n;
+	  pos += length;
+	}
+	else {
+	  uint8_t* buf = (uint8_t*)malloc(length);
+	  n = fread(buf,1,length,fh);
+	  err = de265_push_NAL(ctx, buf,n,  pos, (void*)1);
+
+	  if (write_bytestream) {
+	    uint8_t sc[3] = { 0,0,1 };
+	    fwrite(sc ,1,3,bytestream_fh);
+	    fwrite(buf,1,n,bytestream_fh);
+	  }
+
+	  free(buf);
+	  pos+=n;
+	}
       }
       else {
         // read a chunk of input data
