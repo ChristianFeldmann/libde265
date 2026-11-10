@@ -26,6 +26,11 @@ jobs:
           cd build
           cmake ..
           cmake --build . --parallel 4
+      - name: List files
+        if: runner.os	== 'Windows'
+        run: |
+          cd build/libde265
+          dir
       - name: Upload Artifact (Linux)
         uses: actions/upload-artifact@v7
         if: runner.os	== 'Linux'
